@@ -1,0 +1,363 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model HealthCheck {
+  id        String   @id @default(uuid())
+  status    String   @default("ok")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("health_checks")
+}
+
+model User {
+  id              String      @id @default(uuid())
+  displayName     String      @map("display_name")
+  email           String?     @unique
+  phone           String?     @unique
+  passwordHash    String      @map("password_hash")
+  status          String      @default("PENDING_VERIFICATION")
+  role            String      @default("USER")
+  emailVerifiedAt DateTime?   @map("email_verified_at")
+  phoneVerifiedAt DateTime?   @map("phone_verified_at")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  verifications       UserVerification[]
+  refreshTokens       RefreshToken[]
+  locations           UserLocation[]
+  listings            Listing[]
+  buyerConversations  Conversation[]     @relation("BuyerConversations")
+  sellerConversations Conversation[]     @relation("SellerConversations")
+  messages            Message[]
+  favorites           Favorite[]
+  buyerOffers         Offer[]            @relation("BuyerOffers")
+  sellerOffers        Offer[]            @relation("SellerOffers")
+  notifications       Notification[]
+
+  @@map("users")
+}
+
+model Listing {
+  id                 String    @id @default(uuid())
+  sellerId           String    @map("seller_id")
+  categoryId         String    @map("category_id")
+  subcategoryId      String?   @map("subcategory_id")
+  title              String
+  description        String
+  price              Float
+  condition          String    @default("USED")
+  countryCode        String    @default("US") @map("country_code")
+  stateCode          String    @default("NY") @map("state_code")
+  cityCode           String    @default("NYC") @map("city_code")
+  locationVisibility String    @default("APPROXIMATE") @map("location_visibility")
+  status             String    @default("DRAFT")
+  submittedAt        DateTime? @map("submitted_at")
+  approvedAt         DateTime? @map("approved_at")
+  publishedAt        DateTime? @map("published_at")
+  expiresAt          DateTime? @map("expires_at")
+  soldAt             DateTime? @map("sold_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  seller        User                 @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  category      Category             @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  attributes    ListingAttribute[]
+  media         ListingMedia[]
+  sanitization  ListingSanitization?
+  conversations Conversation[]
+  favorites     Favorite[]
+  offers        Offer[]
+
+  @@map("listings")
+}
+
+model ListingSanitization {
+  id            String    @id @default(uuid())
+  listingId     String    @unique @map("listing_id")
+  status        String    @default("PENDING")
+  score         Float     @default(1.0)
+  reasons       String?
+  checks        String?
+  engineVersion String    @default("1.0.0") @map("engine_version")
+  reviewedBy    String?   @map("reviewed_by")
+  reviewedAt    DateTime? @map("reviewed_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@map("listing_sanitization")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String   @map("actor_id")
+  action     String
+  targetType String   @map("target_type")
+  targetId   String   @map("target_id")
+  details    String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}
+
+model ListingAttribute {
+  id                    String    @id @default(uuid())
+  listingId             String    @map("listing_id")
+  attributeDefinitionId String    @map("attribute_definition_id")
+  valueText             String?   @map("value_text")
+  valueNumber           Float?    @map("value_number")
+  valueBoolean          Boolean?  @map("value_boolean")
+  valueDate             DateTime? @map("value_date")
+  valueJson             String?   @map("value_json")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  listing             Listing             @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  attributeDefinition AttributeDefinition @relation(fields: [attributeDefinitionId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, attributeDefinitionId])
+  @@map("listing_attributes")
+}
+
+model ListingMedia {
+  id               String   @id @default(uuid())
+  listingId        String   @map("listing_id")
+  mediaType        String   @default("IMAGE") @map("media_type")
+  storageKey       String   @map("storage_key")
+  url              String
+  thumbnailKey     String?  @map("thumbnail_key")
+  mimeType         String   @default("image/jpeg") @map("mime_type")
+  fileSize         Int      @default(0) @map("file_size")
+  sortOrder        Int      @default(0) @map("sort_order")
+  moderationStatus String   @default("APPROVED") @map("moderation_status")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@map("listing_media")
+}
+
+model ServiceArea {
+  id             String   @id @default(uuid())
+  countryCode    String   @map("country_code")
+  stateCode      String   @map("state_code")
+  stateName      String   @map("state_name")
+  cityCode       String   @map("city_code")
+  cityName       String   @map("city_name")
+  isActive       Boolean  @default(true) @map("is_active")
+  buyingEnabled  Boolean  @default(true) @map("buying_enabled")
+  sellingEnabled Boolean  @default(true) @map("selling_enabled")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([countryCode, stateCode, cityCode])
+  @@map("service_areas")
+}
+
+model UserLocation {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  countryCode    String   @map("country_code")
+  stateCode      String   @map("state_code")
+  stateName      String   @map("state_name")
+  cityId         String?  @map("city_id")
+  cityName       String   @map("city_name")
+  latitude       Float?
+  longitude      Float?
+  locationSource String   @default("USER_SELECTED") @map("location_source")
+  isPrimary      Boolean  @default(true) @map("is_primary")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_locations")
+}
+
+model UserVerification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  channel   String
+  code      String
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_verifications")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  token     String    @unique
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  parentId  String?  @map("parent_id")
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  parent     Category?             @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children   Category[]            @relation("CategoryHierarchy")
+  attributes AttributeDefinition[]
+  listings   Listing[]
+
+  @@map("categories")
+}
+
+model AttributeDefinition {
+  id               String   @id @default(uuid())
+  categoryId       String   @map("category_id")
+  name             String
+  slug             String
+  dataType         String   @map("data_type")
+  isRequired       Boolean  @default(false) @map("is_required")
+  isFilterable     Boolean  @default(true) @map("is_filterable")
+  isSearchable     Boolean  @default(true) @map("is_searchable")
+  isDisplayable    Boolean  @default(true) @map("is_displayable")
+  validationConfig String?  @map("validation_config")
+  sortOrder        Int      @default(0) @map("sort_order")
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  category          Category           @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  options           AttributeOption[]
+  listingAttributes ListingAttribute[]
+
+  @@unique([categoryId, slug])
+  @@map("attribute_definitions")
+}
+
+model AttributeOption {
+  id                    String  @id @default(uuid())
+  attributeDefinitionId String  @map("attribute_definition_id")
+  label                 String
+  value                 String
+  sortOrder             Int     @default(0) @map("sort_order")
+  isActive              Boolean @default(true) @map("is_active")
+
+  attributeDefinition AttributeDefinition @relation(fields: [attributeDefinitionId], references: [id], onDelete: Cascade)
+
+  @@map("attribute_options")
+}
+
+model Conversation {
+  id            String   @id @default(uuid())
+  listingId     String   @map("listing_id")
+  buyerId       String   @map("buyer_id")
+  sellerId      String   @map("seller_id")
+  lastMessageAt DateTime @default(now()) @map("last_message_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  listing  Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer    User      @relation("BuyerConversations", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller   User      @relation("SellerConversations", fields: [sellerId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([listingId, buyerId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String   @map("conversation_id")
+  senderId       String   @map("sender_id")
+  content        String
+  isRead         Boolean  @default(false) @map("is_read")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model Favorite {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  listingId String   @map("listing_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, listingId])
+  @@map("favorites")
+}
+
+model Offer {
+  id            String    @id @default(uuid())
+  listingId     String    @map("listing_id")
+  buyerId       String    @map("buyer_id")
+  sellerId      String    @map("seller_id")
+  amount        Float
+  status        String    @default("PENDING")
+  message       String?
+  parentOfferId String?   @map("parent_offer_id")
+  expiresAt     DateTime? @map("expires_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  listing     Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyer       User    @relation("BuyerOffers", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller      User    @relation("SellerOffers", fields: [sellerId], references: [id], onDelete: Cascade)
+  parentOffer Offer?  @relation("OfferChain", fields: [parentOfferId], references: [id], onDelete: SetNull)
+  counterOffers Offer[] @relation("OfferChain")
+
+  @@map("offers")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String
+  title     String
+  body      String
+  data      String?
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model Report {
+  id          String    @id @default(uuid())
+  reporterId  String    @map("reporter_id")
+  targetType  String    @map("target_type")
+  targetId    String    @map("target_id")
+  reason      String
+  description String?
+  status      String    @default("PENDING")
+  reviewedBy  String?   @map("reviewed_by")
+  reviewedAt  DateTime? @map("reviewed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("reports")
+}
+
