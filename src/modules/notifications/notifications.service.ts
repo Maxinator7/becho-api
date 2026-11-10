@@ -1,5 +1,9 @@
 import { prisma } from '../../common/prisma.js';
+import { Prisma } from '@prisma/client';
 import { NotificationType } from '../../common/types/enums.js';
+
+const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
+const money = (amount: number) => inr.format(amount);
 
 export class NotificationsService {
   /**
@@ -19,7 +23,7 @@ export class NotificationsService {
         type,
         title,
         body,
-        data: data ? JSON.stringify(data) : null,
+        data: (data as Prisma.InputJsonValue) ?? undefined,
       },
     });
   }
@@ -42,10 +46,7 @@ export class NotificationsService {
     ]);
 
     return {
-      notifications: notifications.map((n) => ({
-        ...n,
-        data: n.data ? JSON.parse(n.data) : null,
-      })),
+      notifications,
       pagination: {
         total,
         page: Math.max(1, page),
@@ -125,41 +126,41 @@ export class NotificationsService {
       sellerId,
       NotificationType.OFFER_CREATED,
       'New Offer Received',
-      `${buyerName} offered $${amount} for "${listingTitle}"`,
+      `${buyerName} offered ${money(amount)} for "${listingTitle}"`,
       { offerId, listingId }
     );
   }
 
   static async notifyOfferAccepted(
-    buyerId: string,
-    sellerName: string,
+    recipientId: string,
+    actorName: string,
     amount: number,
     listingTitle: string,
     offerId: string,
     listingId: string
   ) {
     return this.createNotification(
-      buyerId,
+      recipientId,
       NotificationType.OFFER_ACCEPTED,
       'Offer Accepted!',
-      `${sellerName} accepted your offer of $${amount} for "${listingTitle}"`,
+      `${actorName} accepted your offer of ${money(amount)} for "${listingTitle}"`,
       { offerId, listingId }
     );
   }
 
   static async notifyOfferRejected(
-    buyerId: string,
-    sellerName: string,
+    recipientId: string,
+    actorName: string,
     amount: number,
     listingTitle: string,
     offerId: string,
     listingId: string
   ) {
     return this.createNotification(
-      buyerId,
+      recipientId,
       NotificationType.OFFER_REJECTED,
       'Offer Declined',
-      `${sellerName} declined your offer of $${amount} for "${listingTitle}"`,
+      `${actorName} declined your offer of ${money(amount)} for "${listingTitle}"`,
       { offerId, listingId }
     );
   }
@@ -176,7 +177,7 @@ export class NotificationsService {
       recipientId,
       NotificationType.OFFER_COUNTERED,
       'Counter Offer',
-      `${counterpartyName} countered with $${amount} for "${listingTitle}"`,
+      `${counterpartyName} countered with ${money(amount)} for "${listingTitle}"`,
       { offerId, listingId }
     );
   }

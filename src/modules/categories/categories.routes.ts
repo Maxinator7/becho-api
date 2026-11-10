@@ -1,49 +1,49 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
+import { z } from 'zod';
 import { CategoriesService } from './categories.service.js';
 import { authenticateToken, requireRole } from '../../common/middleware/auth-guard.js';
-import { UserRole } from '../../common/types/enums.js';
+import { asyncHandler as wrap } from '../../common/async-handler.js';
+import { id } from '../../common/validation.js';
+import { AttributeDataType, UserRole } from '../../common/types/enums.js';
 
 export const categoriesRouter = Router();
 
-// Public: Get categories tree
-categoriesRouter.get('/', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const categories = await CategoriesService.getCategoriesTree();
-    res.json({ success: true, data: categories });
-  } catch (err) {
-    next(err);
-  }
+const slug = z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must be lowercase words separated by dashes');
+
+const createCategorySchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  slug,
+  parentId: id.optional(),
+  sortOrder: z.number().int().optional(),
 });
 
-// Public: Get attributes for category
-categoriesRouter.get('/:id/attributes', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const attributes = await CategoriesService.getCategoryAttributes(req.params.id);
-    res.json({ success: true, data: attributes });
-  } catch (err) {
-    next(err);
-  }
+const createAttributeSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  slug,
+  dataType: z.nativeEnum(AttributeDataType),
+  isRequired: z.boolean().optional(),
+  isFilterable: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+  validationConfig: z.record(z.unknown()).optional(),
+  options: z.array(z.object({ label: z.string().trim().min(1), value: z.string().trim().min(1) })).optional(),
 });
 
-// Admin: Create category
-categoriesRouter.post('/admin', authenticateToken, requireRole(UserRole.ADMIN), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const category = await CategoriesService.createCategory(req.body);
-    res.status(201).json({ success: true, data: category });
-  } catch (err) {
-    next(err);
-  }
-});
+categoriesRouter.get('/', wrap(async (_req, res) => {
+  res.json({ success: true, data: await CategoriesService.getCategoriesTree() });
+}));
 
-// Admin: Add attribute definition
-categoriesRouter.post('/admin/:id/attributes', authenticateToken, requireRole(UserRole.ADMIN), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const attribute = await CategoriesService.addAttributeDefinition({
-      ...req.body,
-      categoryId: req.params.id,
-    });
-    res.status(201).json({ success: true, data: attribute });
-  } catch (err) {
-    next(err);
-  }
-});
+categoriesRouter.get('/:id/attributes', wrap(async (req, res) => {
+  res.json({ success: true, data: await CategoriesService.getCategoryAttributes(id.parse(req.params.id)) });
+}));
+
+categoriesRouter.post('/admin', authenticateToken, requireRole(UserRole.ADMIN), wrap(async (req, res) => {
+  res.status(201).json({ success: true, data: await CategoriesService.createCategory(createCategorySchema.parse(req.body)) });
+}));
+
+categoriesRouter.post('/admin/:id/attributes', authenticateToken, requireRole(UserRole.ADMIN), wrap(async (req, res) => {
+  const attribute = await CategoriesService.addAttributeDefinition({
+    ...createAttributeSchema.parse(req.body),
+    categoryId: id.parse(req.params.id),
+  });
+  res.status(201).json({ success: true, data: attribute });
+}));

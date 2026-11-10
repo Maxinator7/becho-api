@@ -3,14 +3,31 @@ import { z } from 'zod';
 
 dotenv.config();
 
-const envSchema = z.object({
-  PORT: z.string().default('4000').transform((val) => parseInt(val, 10)),
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-  CLIENT_WEB_URL: z.string().default('http://localhost:3000'),
-  JWT_SECRET: z.string().default('becho_default_dev_jwt_secret_key_change_in_prod'),
-  JWT_REFRESH_SECRET: z.string().default('becho_default_dev_jwt_refresh_secret_key_change_in_prod'),
-});
+const DEV_JWT_SECRET = 'becho_default_dev_jwt_secret_key_change_in_prod';
+const DEV_JWT_REFRESH_SECRET = 'becho_default_dev_jwt_refresh_secret_key_change_in_prod';
+
+const envSchema = z
+  .object({
+    PORT: z.string().default('4000').transform((val) => parseInt(val, 10)),
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+    CORS_ORIGINS: z
+      .string()
+      .default('http://localhost:3000')
+      .transform((val) => val.split(',').map((o) => o.trim()).filter(Boolean)),
+    JWT_SECRET: z.string().default(DEV_JWT_SECRET),
+    JWT_REFRESH_SECRET: z.string().default(DEV_JWT_REFRESH_SECRET),
+    JOBS_INTERVAL_MINUTES: z.string().default('15').transform((val) => parseInt(val, 10)),
+  })
+  .superRefine((cfg, ctx) => {
+    if (cfg.NODE_ENV !== 'production') return;
+    for (const key of ['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const) {
+      const value = cfg[key];
+      if (value === DEV_JWT_SECRET || value === DEV_JWT_REFRESH_SECRET || value.startsWith('change-me') || value.length < 32) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} must be set to a strong secret (32+ chars) in production` });
+      }
+    }
+  });
 
 const _env = envSchema.safeParse(process.env);
 
@@ -20,3 +37,4 @@ if (!_env.success) {
 }
 
 export const env = _env.data;
+export const isProduction = env.NODE_ENV === 'production';

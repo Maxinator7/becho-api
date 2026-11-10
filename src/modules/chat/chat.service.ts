@@ -1,6 +1,7 @@
 import { prisma } from '../../common/prisma.js';
 import { ApiError } from '../../common/errors/api-error.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { ListingStatus } from '../../common/types/enums.js';
 
 export class ChatService {
   static async getOrCreateConversation(listingId: string, buyerId: string) {
@@ -14,6 +15,12 @@ export class ChatService {
 
     if (listing.sellerId === buyerId) {
       throw ApiError.badRequest('You cannot start a conversation on your own listing', 'CANNOT_MESSAGE_SELF');
+    }
+
+    if (listing.status !== ListingStatus.LIVE && listing.status !== ListingStatus.RESERVED) {
+      // Existing conversations stay readable, but new ones can only start on available listings.
+      const existing = await prisma.conversation.findUnique({ where: { listingId_buyerId: { listingId, buyerId } } });
+      if (!existing) throw ApiError.badRequest('This listing is not available', 'LISTING_NOT_AVAILABLE');
     }
 
     let conversation = await prisma.conversation.findUnique({
@@ -119,21 +126,13 @@ export class ChatService {
       throw ApiError.forbidden('Access denied to conversation', 'FORBIDDEN');
     }
 
-    const message = await prisma.message.create({
-      data: {
-        conversationId,
-        senderId,
-        content: content.trim(),
-      },
-      include: {
-        sender: { select: { id: true, displayName: true } },
-      },
-    });
-
-    await prisma.conversation.update({
-      where: { id: conversationId },
-      data: { lastMessageAt: new Date() },
-    });
+    const [message] = await prisma.$transaction([
+      prisma.message.create({
+        data: { conversationId, senderId, content: content.trim() },
+        include: { sender: { select: { id: true, displayName: true } } },
+      }),
+      prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date() } }),
+    ]);
 
     // Notify the other participant
     const recipientId = conversation.buyerId === senderId ? conversation.sellerId : conversation.buyerId;

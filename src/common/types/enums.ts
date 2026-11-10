@@ -25,6 +25,7 @@ export const ListingStatus = {
   PENDING_REVIEW: 'PENDING_REVIEW',
   APPROVED: 'APPROVED',
   LIVE: 'LIVE',
+  RESERVED: 'RESERVED',
   REJECTED: 'REJECTED',
   SUSPENDED: 'SUSPENDED',
   SOLD: 'SOLD',
@@ -116,3 +117,16 @@ export const ReportStatus = {
 } as const;
 export type ReportStatus = typeof ReportStatus[keyof typeof ReportStatus];
 
+
+/** Phase 0 market: India. */
+export const DEFAULT_CURRENCY = 'INR';
+export const DEFAULT_COUNTRY_CODE = 'IN';
+
+export const ListingCondition = {
+  NEW: 'NEW',
+  LIKE_NEW: 'LIKE_NEW',
+  USED: 'USED',
+  REFURBISHED: 'REFURBISHED',
+  FOR_PARTS: 'FOR_PARTS',
+} as const;
+export type ListingCondition = typeof ListingCondition[keyof typeof ListingCondition];

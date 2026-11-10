@@ -1,85 +1,75 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
+import { z } from 'zod';
 import { ServiceAreasService } from './service-areas.service.js';
 import { LocationsService } from './locations.service.js';
 import { authenticateToken, requireRole } from '../../common/middleware/auth-guard.js';
-import { UserRole } from '../../common/types/enums.js';
+import { asyncHandler as wrap } from '../../common/async-handler.js';
+import { id } from '../../common/validation.js';
+import { DEFAULT_COUNTRY_CODE, LocationSource, UserRole } from '../../common/types/enums.js';
 
 export const locationsRouter = Router();
 
-// Public: Get active service areas
-locationsRouter.get('/service-areas', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const areas = await ServiceAreasService.getActiveServiceAreas();
-    res.json({ success: true, data: areas });
-  } catch (err) {
-    next(err);
-  }
+const code = (max: number) => z.string().trim().min(1).max(max).toUpperCase();
+
+const availabilitySchema = z.object({
+  countryCode: code(2).default(DEFAULT_COUNTRY_CODE),
+  stateCode: code(10),
+  cityName: z.string().trim().min(1).max(80),
 });
 
-// Public: Check marketplace availability by location
-locationsRouter.get('/availability', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { countryCode, stateCode, cityName } = req.query;
-    if (!countryCode || !stateCode || !cityName) {
-      return res.status(400).json({ success: false, error: { message: 'countryCode, stateCode, and cityName query params required' } });
-    }
-    const availability = await LocationsService.checkMarketplaceAvailability(
-      String(countryCode),
-      String(stateCode),
-      String(cityName)
-    );
-    res.json({ success: true, data: availability });
-  } catch (err) {
-    next(err);
-  }
+const setLocationSchema = z.object({
+  countryCode: code(2).default(DEFAULT_COUNTRY_CODE),
+  stateCode: code(10),
+  stateName: z.string().trim().min(1).max(80),
+  cityName: z.string().trim().min(1).max(80),
+  cityId: z.string().optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+  locationSource: z.nativeEnum(LocationSource).optional(),
 });
 
-// User: Get primary location
-locationsRouter.get('/users/me/location', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const location = await LocationsService.getUserPrimaryLocation(req.user!.userId);
-    res.json({ success: true, data: location });
-  } catch (err) {
-    next(err);
-  }
+const createAreaSchema = z.object({
+  countryCode: code(2).default(DEFAULT_COUNTRY_CODE),
+  stateCode: code(10),
+  stateName: z.string().trim().min(1).max(80),
+  cityCode: code(20),
+  cityName: z.string().trim().min(1).max(80),
+  isActive: z.boolean().optional(),
+  buyingEnabled: z.boolean().optional(),
+  sellingEnabled: z.boolean().optional(),
 });
 
-// User: Set primary location
-locationsRouter.post('/users/me/location', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await LocationsService.setUserPrimaryLocation(req.user!.userId, req.body);
-    res.json({ success: true, data: result });
-  } catch (err) {
-    next(err);
-  }
+const updateAreaSchema = z.object({
+  isActive: z.boolean().optional(),
+  buyingEnabled: z.boolean().optional(),
+  sellingEnabled: z.boolean().optional(),
 });
 
-// Admin: Get all service areas
-locationsRouter.get('/admin/service-areas', authenticateToken, requireRole(UserRole.ADMIN, UserRole.MODERATOR), async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const areas = await ServiceAreasService.getAllServiceAreasAdmin();
-    res.json({ success: true, data: areas });
-  } catch (err) {
-    next(err);
-  }
-});
+locationsRouter.get('/service-areas', wrap(async (_req, res) => {
+  res.json({ success: true, data: await ServiceAreasService.getActiveServiceAreas() });
+}));
 
-// Admin: Create service area
-locationsRouter.post('/admin/service-areas', authenticateToken, requireRole(UserRole.ADMIN), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const area = await ServiceAreasService.createServiceArea(req.body);
-    res.status(201).json({ success: true, data: area });
-  } catch (err) {
-    next(err);
-  }
-});
+locationsRouter.get('/availability', wrap(async (req, res) => {
+  const { countryCode, stateCode, cityName } = availabilitySchema.parse(req.query);
+  res.json({ success: true, data: await LocationsService.checkMarketplaceAvailability(countryCode, stateCode, cityName) });
+}));
 
-// Admin: Update service area status
-locationsRouter.patch('/admin/service-areas/:id', authenticateToken, requireRole(UserRole.ADMIN), async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const area = await ServiceAreasService.updateServiceArea(req.params.id, req.body);
-    res.json({ success: true, data: area });
-  } catch (err) {
-    next(err);
-  }
-});
+locationsRouter.get('/users/me/location', authenticateToken, wrap(async (req, res) => {
+  res.json({ success: true, data: await LocationsService.getUserPrimaryLocation(req.user!.userId) });
+}));
+
+locationsRouter.post('/users/me/location', authenticateToken, wrap(async (req, res) => {
+  res.json({ success: true, data: await LocationsService.setUserPrimaryLocation(req.user!.userId, setLocationSchema.parse(req.body)) });
+}));
+
+locationsRouter.get('/admin/service-areas', authenticateToken, requireRole(UserRole.ADMIN, UserRole.MODERATOR), wrap(async (_req, res) => {
+  res.json({ success: true, data: await ServiceAreasService.getAllServiceAreasAdmin() });
+}));
+
+locationsRouter.post('/admin/service-areas', authenticateToken, requireRole(UserRole.ADMIN), wrap(async (req, res) => {
+  res.status(201).json({ success: true, data: await ServiceAreasService.createServiceArea(createAreaSchema.parse(req.body)) });
+}));
+
+locationsRouter.patch('/admin/service-areas/:id', authenticateToken, requireRole(UserRole.ADMIN), wrap(async (req, res) => {
+  res.json({ success: true, data: await ServiceAreasService.updateServiceArea(id.parse(req.params.id), updateAreaSchema.parse(req.body)) });
+}));

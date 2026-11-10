@@ -1,309 +1,271 @@
+import { Offer, Prisma } from '@prisma/client';
 import { prisma } from '../../common/prisma.js';
 import { ApiError } from '../../common/errors/api-error.js';
-import { OfferStatus } from '../../common/types/enums.js';
+import { ListingStatus, OfferStatus } from '../../common/types/enums.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 
 const OFFER_EXPIRY_HOURS = 48;
+const offerExpiry = () => new Date(Date.now() + OFFER_EXPIRY_HOURS * 60 * 60 * 1000);
 
-export interface CreateOfferInput {
-  listingId: string;
+export interface OfferAmountInput {
   amount: number;
   message?: string;
 }
 
-export interface CounterOfferInput {
-  amount: number;
-  message?: string;
-}
+const offerInclude = {
+  buyer: { select: { id: true, displayName: true } },
+  seller: { select: { id: true, displayName: true } },
+  proposedBy: { select: { id: true, displayName: true } },
+  listing: { select: { id: true, title: true, price: true, currency: true, status: true } },
+  parentOffer: { select: { id: true, amount: true, status: true, proposedById: true } },
+} satisfies Prisma.OfferInclude;
 
+/**
+ * Negotiation model
+ * - buyerId / sellerId are fixed for the whole negotiation (seller = listing owner).
+ * - proposedById is whoever put this amount on the table.
+ * - Only the *other* party can accept, reject or counter an offer.
+ * - Only the proposer can cancel (withdraw) it.
+ */
 export class OffersService {
-  /**
-   * Buyer creates a new offer on a listing.
-   * Only one PENDING offer per buyer per listing is allowed.
-   */
-  static async createOffer(buyerId: string, input: CreateOfferInput) {
-    const listing = await prisma.listing.findUnique({
-      where: { id: input.listingId },
-    });
+  private static async getPendingOffer(offerId: string) {
+    const offer = await prisma.offer.findUnique({ where: { id: offerId } });
+    if (!offer) throw ApiError.notFound('Offer not found', 'OFFER_NOT_FOUND');
+    if (offer.status !== OfferStatus.PENDING) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
+    if (offer.expiresAt && offer.expiresAt < new Date()) {
+      await prisma.offer.update({ where: { id: offerId }, data: { status: OfferStatus.EXPIRED } });
+      throw ApiError.badRequest('Offer has expired', 'OFFER_EXPIRED');
+    }
+    return offer;
+  }
 
+  /** Asserts the actor is a party but NOT the proposer (i.e. it's their turn to respond). */
+  private static assertResponder(offer: Offer, actorId: string) {
+    if (offer.buyerId !== actorId && offer.sellerId !== actorId) {
+      throw ApiError.forbidden('You are not a party to this offer', 'FORBIDDEN');
+    }
+    if (offer.proposedById === actorId) {
+      throw ApiError.badRequest('You cannot respond to your own offer', 'OWN_OFFER');
+    }
+  }
+
+  private static async assertListingLive(listingId: string) {
+    const listing = await prisma.listing.findUnique({ where: { id: listingId } });
     if (!listing) throw ApiError.notFound('Listing not found', 'LISTING_NOT_FOUND');
-    if (listing.status !== 'LIVE') throw ApiError.badRequest('Listing is not available for offers', 'LISTING_NOT_LIVE');
-    if (listing.sellerId === buyerId) throw ApiError.badRequest('You cannot make an offer on your own listing', 'CANNOT_OFFER_OWN_LISTING');
+    if (listing.status !== ListingStatus.LIVE) {
+      throw ApiError.badRequest('Listing is not available for offers', 'LISTING_NOT_LIVE');
+    }
+    return listing;
+  }
 
-    if (input.amount <= 0) throw ApiError.badRequest('Offer amount must be greater than 0', 'INVALID_OFFER_AMOUNT');
+  /** Buyer opens (or restarts) a negotiation. Any open offer in this buyer's thread is superseded. */
+  static async createOffer(buyerId: string, input: OfferAmountInput & { listingId: string }) {
+    const listing = await this.assertListingLive(input.listingId);
+    if (listing.sellerId === buyerId) {
+      throw ApiError.badRequest('You cannot make an offer on your own listing', 'CANNOT_OFFER_OWN_LISTING');
+    }
 
-    // Cancel any existing pending offer from this buyer on this listing
-    await prisma.offer.updateMany({
-      where: {
-        listingId: input.listingId,
-        buyerId,
-        status: OfferStatus.PENDING,
-      },
-      data: { status: OfferStatus.CANCELLED },
+    const offer = await prisma.$transaction(async (tx) => {
+      await tx.offer.updateMany({
+        where: { listingId: listing.id, buyerId, status: OfferStatus.PENDING },
+        data: { status: OfferStatus.CANCELLED },
+      });
+      return tx.offer.create({
+        data: {
+          listingId: listing.id,
+          buyerId,
+          sellerId: listing.sellerId,
+          proposedById: buyerId,
+          amount: input.amount,
+          message: input.message || null,
+          status: OfferStatus.PENDING,
+          expiresAt: offerExpiry(),
+        },
+        include: offerInclude,
+      });
     });
 
-    const expiresAt = new Date(Date.now() + OFFER_EXPIRY_HOURS * 60 * 60 * 1000);
-
-    const offer = await prisma.offer.create({
-      data: {
-        listingId: input.listingId,
-        buyerId,
-        sellerId: listing.sellerId,
-        amount: input.amount,
-        message: input.message || null,
-        status: OfferStatus.PENDING,
-        expiresAt,
-      },
-      include: {
-        buyer: { select: { id: true, displayName: true } },
-        seller: { select: { id: true, displayName: true } },
-        listing: { select: { id: true, title: true, price: true } },
-      },
-    });
-
-    // Notify seller about new offer
     NotificationsService.notifyOfferCreated(
-      offer.seller.id,
-      offer.buyer.displayName,
-      offer.amount,
-      offer.listing.title,
-      offer.id,
-      offer.listing.id
+      offer.sellerId, offer.buyer.displayName, offer.amount, offer.listing.title, offer.id, offer.listingId
     ).catch(() => {});
 
     return offer;
   }
 
-  /**
-   * Seller (or buyer) counters an existing offer.
-   * The original offer is marked COUNTERED and a new PENDING offer is created.
-   */
-  static async counterOffer(offerId: string, actorId: string, input: CounterOfferInput) {
-    const offer = await prisma.offer.findUnique({
-      where: { id: offerId },
-      include: { listing: true },
+  /** The responding party proposes a different amount. */
+  static async counterOffer(offerId: string, actorId: string, input: OfferAmountInput) {
+    const offer = await this.getPendingOffer(offerId);
+    this.assertResponder(offer, actorId);
+    await this.assertListingLive(offer.listingId);
+
+    const counter = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.offer.updateMany({
+        where: { id: offerId, status: OfferStatus.PENDING },
+        data: { status: OfferStatus.COUNTERED },
+      });
+      if (count === 0) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
+
+      return tx.offer.create({
+        data: {
+          listingId: offer.listingId,
+          buyerId: offer.buyerId,
+          sellerId: offer.sellerId,
+          proposedById: actorId,
+          amount: input.amount,
+          message: input.message || null,
+          status: OfferStatus.PENDING,
+          parentOfferId: offerId,
+          expiresAt: offerExpiry(),
+        },
+        include: offerInclude,
+      });
     });
 
-    if (!offer) throw ApiError.notFound('Offer not found', 'OFFER_NOT_FOUND');
-    if (offer.status !== OfferStatus.PENDING) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
+    const recipientId = actorId === offer.sellerId ? offer.buyerId : offer.sellerId;
+    NotificationsService.notifyOfferCountered(
+      recipientId, counter.proposedBy.displayName, counter.amount, counter.listing.title, counter.id, counter.listingId
+    ).catch(() => {});
 
-    // Only the other party can counter
-    const isBuyer = offer.buyerId === actorId;
-    const isSeller = offer.sellerId === actorId;
-    if (!isBuyer && !isSeller) throw ApiError.forbidden('You are not a party to this offer', 'FORBIDDEN');
-    if ((isBuyer && offer.buyerId === actorId && offer.parentOfferId === null && !isSeller)) {
-      // buyer countering their own initial offer is ok only if seller sent the parent
-      // simplified: allow either party to counter while PENDING
+    return counter;
+  }
+
+  /**
+   * The responding party accepts. The listing becomes RESERVED for this buyer and every
+   * other open offer on the listing is rejected. Race-safe: concurrent accepts can't both win.
+   */
+  static async acceptOffer(offerId: string, actorId: string) {
+    const offer = await this.getPendingOffer(offerId);
+    this.assertResponder(offer, actorId);
+
+    const { accepted, competing } = await prisma.$transaction(async (tx) => {
+      const offerUpdate = await tx.offer.updateMany({
+        where: { id: offerId, status: OfferStatus.PENDING },
+        data: { status: OfferStatus.ACCEPTED },
+      });
+      if (offerUpdate.count === 0) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
+
+      const listingUpdate = await tx.listing.updateMany({
+        where: { id: offer.listingId, status: ListingStatus.LIVE },
+        data: { status: ListingStatus.RESERVED, reservedAt: new Date() },
+      });
+      if (listingUpdate.count === 0) {
+        throw ApiError.badRequest('Listing is no longer available', 'LISTING_NOT_LIVE');
+      }
+
+      const competing = await tx.offer.findMany({
+        where: { listingId: offer.listingId, status: OfferStatus.PENDING, id: { not: offerId } },
+        select: { id: true, buyerId: true, amount: true },
+      });
+      await tx.offer.updateMany({
+        where: { id: { in: competing.map((o) => o.id) } },
+        data: { status: OfferStatus.REJECTED },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: 'OFFER_ACCEPTED',
+          targetType: 'OFFER',
+          targetId: offerId,
+          details: { listingId: offer.listingId, amount: offer.amount },
+        },
+      });
+
+      return { accepted: await tx.offer.findUniqueOrThrow({ where: { id: offerId }, include: offerInclude }), competing };
+    });
+
+    const actorName = actorId === accepted.sellerId ? accepted.seller.displayName : accepted.buyer.displayName;
+    NotificationsService.notifyOfferAccepted(
+      accepted.proposedById, actorName, accepted.amount, accepted.listing.title, accepted.id, accepted.listingId
+    ).catch(() => {});
+    for (const other of competing) {
+      NotificationsService.notifyOfferRejected(
+        other.buyerId, accepted.seller.displayName, other.amount, accepted.listing.title, other.id, accepted.listingId
+      ).catch(() => {});
     }
 
-    if (input.amount <= 0) throw ApiError.badRequest('Counter offer amount must be greater than 0', 'INVALID_OFFER_AMOUNT');
-
-    const expiresAt = new Date(Date.now() + OFFER_EXPIRY_HOURS * 60 * 60 * 1000);
-
-    // Mark the existing offer as COUNTERED
-    await prisma.offer.update({
-      where: { id: offerId },
-      data: { status: OfferStatus.COUNTERED },
-    });
-
-    // Create counter offer — swap buyer/seller perspective if seller is countering
-    const newBuyerId = isSeller ? offer.buyerId : actorId;
-    const newSellerId = isSeller ? actorId : offer.sellerId;
-
-    const counterOffer = await prisma.offer.create({
-      data: {
-        listingId: offer.listingId,
-        buyerId: newBuyerId,
-        sellerId: newSellerId,
-        amount: input.amount,
-        message: input.message || null,
-        status: OfferStatus.PENDING,
-        parentOfferId: offerId,
-        expiresAt,
-      },
-      include: {
-        buyer: { select: { id: true, displayName: true } },
-        seller: { select: { id: true, displayName: true } },
-        listing: { select: { id: true, title: true, price: true } },
-        parentOffer: { select: { id: true, amount: true, status: true } },
-      },
-    });
-
-    // Notify the other party about the counter
-    const recipientId = isSeller ? offer.buyerId : offer.sellerId;
-    NotificationsService.notifyOfferCountered(
-      recipientId,
-      isSeller ? counterOffer.seller.displayName : counterOffer.buyer.displayName,
-      counterOffer.amount,
-      counterOffer.listing.title,
-      counterOffer.id,
-      counterOffer.listing.id
-    ).catch(() => {});
-
-    return counterOffer;
+    return accepted;
   }
 
-  /**
-   * Seller accepts a pending offer.
-   */
-  static async acceptOffer(offerId: string, sellerId: string) {
-    const offer = await prisma.offer.findUnique({ where: { id: offerId } });
-
-    if (!offer) throw ApiError.notFound('Offer not found', 'OFFER_NOT_FOUND');
-    if (offer.sellerId !== sellerId) throw ApiError.forbidden('Only the seller can accept this offer', 'FORBIDDEN');
-    if (offer.status !== OfferStatus.PENDING) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
-
-    const updated = await prisma.offer.update({
-      where: { id: offerId },
-      data: { status: OfferStatus.ACCEPTED },
-      include: {
-        buyer: { select: { id: true, displayName: true } },
-        seller: { select: { id: true, displayName: true } },
-        listing: { select: { id: true, title: true, price: true } },
-      },
-    });
-
-    // Notify buyer that offer was accepted
-    NotificationsService.notifyOfferAccepted(
-      updated.buyer.id,
-      updated.seller.displayName,
-      updated.amount,
-      updated.listing.title,
-      updated.id,
-      updated.listing.id
-    ).catch(() => {});
-
-    return updated;
-  }
-
-  /**
-   * Seller or buyer rejects a pending offer.
-   */
+  /** The responding party declines. */
   static async rejectOffer(offerId: string, actorId: string) {
-    const offer = await prisma.offer.findUnique({ where: { id: offerId } });
-
-    if (!offer) throw ApiError.notFound('Offer not found', 'OFFER_NOT_FOUND');
-    if (offer.sellerId !== actorId && offer.buyerId !== actorId) throw ApiError.forbidden('You are not a party to this offer', 'FORBIDDEN');
-    if (offer.status !== OfferStatus.PENDING) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
+    const offer = await this.getPendingOffer(offerId);
+    this.assertResponder(offer, actorId);
 
     const updated = await prisma.offer.update({
       where: { id: offerId },
       data: { status: OfferStatus.REJECTED },
-      include: {
-        buyer: { select: { id: true, displayName: true } },
-        seller: { select: { id: true, displayName: true } },
-        listing: { select: { id: true, title: true, price: true } },
-      },
+      include: offerInclude,
     });
 
-    // Notify the other party about rejection
-    const rejectedPartyId = actorId === offer.sellerId ? offer.buyerId : offer.sellerId;
-    const actorName = actorId === offer.sellerId ? updated.seller.displayName : updated.buyer.displayName;
+    const actorName = actorId === updated.sellerId ? updated.seller.displayName : updated.buyer.displayName;
     NotificationsService.notifyOfferRejected(
-      rejectedPartyId,
-      actorName,
-      updated.amount,
-      updated.listing.title,
-      updated.id,
-      updated.listing.id
+      updated.proposedById, actorName, updated.amount, updated.listing.title, updated.id, updated.listingId
     ).catch(() => {});
 
     return updated;
   }
 
-  /**
-   * Buyer cancels their own pending offer.
-   */
-  static async cancelOffer(offerId: string, buyerId: string) {
+  /** The proposer withdraws their own pending offer. */
+  static async cancelOffer(offerId: string, actorId: string) {
     const offer = await prisma.offer.findUnique({ where: { id: offerId } });
-
     if (!offer) throw ApiError.notFound('Offer not found', 'OFFER_NOT_FOUND');
-    if (offer.buyerId !== buyerId) throw ApiError.forbidden('Only the buyer can cancel this offer', 'FORBIDDEN');
+    if (offer.proposedById !== actorId) throw ApiError.forbidden('Only the person who made this offer can withdraw it', 'FORBIDDEN');
     if (offer.status !== OfferStatus.PENDING) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
 
-    const updated = await prisma.offer.update({
-      where: { id: offerId },
-      data: { status: OfferStatus.CANCELLED },
-      include: {
-        buyer: { select: { id: true, displayName: true } },
-        seller: { select: { id: true, displayName: true } },
-        listing: { select: { id: true, title: true, price: true } },
-      },
-    });
-
-    return updated;
+    return prisma.offer.update({ where: { id: offerId }, data: { status: OfferStatus.CANCELLED }, include: offerInclude });
   }
 
-  /**
-   * Get all offers for a listing (seller view).
-   */
+  // ───────────────────────── reads ─────────────────────────
+
   static async getListingOffers(listingId: string, sellerId: string) {
     const listing = await prisma.listing.findUnique({ where: { id: listingId } });
     if (!listing) throw ApiError.notFound('Listing not found', 'LISTING_NOT_FOUND');
     if (listing.sellerId !== sellerId) throw ApiError.forbidden('Only the seller can view all offers', 'FORBIDDEN');
 
-    return prisma.offer.findMany({
-      where: { listingId },
-      include: {
-        buyer: { select: { id: true, displayName: true } },
-        parentOffer: { select: { id: true, amount: true, status: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    return prisma.offer.findMany({ where: { listingId }, include: offerInclude, orderBy: { createdAt: 'desc' } });
   }
 
-  /**
-   * Get all offers made by the authenticated user (buyer view).
-   */
+  /** Offers in negotiations where I am the buyer. */
   static async getMyOffers(buyerId: string) {
     return prisma.offer.findMany({
       where: { buyerId },
       include: {
-        listing: { select: { id: true, title: true, price: true, media: { take: 1, orderBy: { sortOrder: 'asc' } } } },
-        seller: { select: { id: true, displayName: true } },
-        parentOffer: { select: { id: true, amount: true, status: true } },
-        counterOffers: { select: { id: true, amount: true, status: true, createdAt: true } },
+        ...offerInclude,
+        listing: { select: { id: true, title: true, price: true, currency: true, status: true, media: { take: 1, orderBy: { sortOrder: 'asc' } } } },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  /**
-   * Get all offers received by the authenticated user (seller view).
-   */
+  /** Offers in negotiations where I am the seller. */
   static async getReceivedOffers(sellerId: string) {
     return prisma.offer.findMany({
       where: { sellerId },
       include: {
-        listing: { select: { id: true, title: true, price: true, media: { take: 1, orderBy: { sortOrder: 'asc' } } } },
-        buyer: { select: { id: true, displayName: true } },
-        parentOffer: { select: { id: true, amount: true, status: true } },
-        counterOffers: { select: { id: true, amount: true, status: true, createdAt: true } },
+        ...offerInclude,
+        listing: { select: { id: true, title: true, price: true, currency: true, status: true, media: { take: 1, orderBy: { sortOrder: 'asc' } } } },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  /**
-   * Get offer chain for a specific listing-buyer pair (full negotiation history).
-   */
+  /** Full negotiation history for one listing-buyer pair. */
   static async getOfferChain(listingId: string, buyerId: string, actorId: string) {
     const listing = await prisma.listing.findUnique({ where: { id: listingId } });
     if (!listing) throw ApiError.notFound('Listing not found', 'LISTING_NOT_FOUND');
+    if (actorId !== buyerId && actorId !== listing.sellerId) throw ApiError.forbidden('Access denied', 'FORBIDDEN');
 
-    // Actor must be buyer or seller of this listing
-    if (actorId !== buyerId && actorId !== listing.sellerId) {
-      throw ApiError.forbidden('Access denied', 'FORBIDDEN');
-    }
+    return prisma.offer.findMany({ where: { listingId, buyerId }, include: offerInclude, orderBy: { createdAt: 'asc' } });
+  }
 
-    return prisma.offer.findMany({
-      where: { listingId, buyerId },
-      include: {
-        buyer: { select: { id: true, displayName: true } },
-        seller: { select: { id: true, displayName: true } },
-        parentOffer: { select: { id: true, amount: true, status: true } },
-      },
-      orderBy: { createdAt: 'asc' },
+  // ───────────────────────── background job ─────────────────────────
+
+  static async expireOffers() {
+    const { count } = await prisma.offer.updateMany({
+      where: { status: OfferStatus.PENDING, expiresAt: { lte: new Date() } },
+      data: { status: OfferStatus.EXPIRED },
     });
+    return { expiredCount: count };
   }
 }

@@ -1,113 +1,59 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
+import { asyncHandler as wrap } from '../../common/async-handler.js';
+import { z } from 'zod';
 import { OffersService } from './offers.service.js';
-import { authenticateToken } from '../../common/middleware/auth-guard.js';
+import { authenticateToken, requireActiveStatus } from '../../common/middleware/auth-guard.js';
+import { id } from '../../common/validation.js';
 
 export const offersRouter = Router();
 
-// All offer endpoints require authentication
+const amountSchema = z.object({
+  amount: z.coerce.number().positive('Offer amount must be greater than 0').max(1_000_000_000),
+  message: z.string().trim().max(500).optional(),
+});
+const createOfferSchema = amountSchema.extend({ listingId: id });
+const chainQuerySchema = z.object({ listingId: id, buyerId: id });
+
+
 offersRouter.use(authenticateToken);
 
-// POST /api/v1/offers — Buyer creates a new offer
-offersRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { listingId, amount, message } = req.body;
-    if (!listingId || amount === undefined) {
-      res.status(400).json({ success: false, error: { code: 'MISSING_FIELDS', message: 'listingId and amount are required' } });
-      return;
-    }
-    const offer = await OffersService.createOffer(req.user!.userId, { listingId, amount: Number(amount), message });
-    res.status(201).json({ success: true, data: offer });
-  } catch (err) {
-    next(err);
-  }
-});
+// Buyer creates a new offer
+offersRouter.post('/', requireActiveStatus, wrap(async (req, res) => {
+  const offer = await OffersService.createOffer(req.user!.userId, createOfferSchema.parse(req.body));
+  res.status(201).json({ success: true, data: offer });
+}));
 
-// GET /api/v1/offers/mine — Buyer: get offers I've made
-offersRouter.get('/mine', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const offers = await OffersService.getMyOffers(req.user!.userId);
-    res.json({ success: true, data: offers });
-  } catch (err) {
-    next(err);
-  }
-});
+offersRouter.get('/mine', wrap(async (req, res) => {
+  res.json({ success: true, data: await OffersService.getMyOffers(req.user!.userId) });
+}));
 
-// GET /api/v1/offers/received — Seller: get offers I've received
-offersRouter.get('/received', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const offers = await OffersService.getReceivedOffers(req.user!.userId);
-    res.json({ success: true, data: offers });
-  } catch (err) {
-    next(err);
-  }
-});
+offersRouter.get('/received', wrap(async (req, res) => {
+  res.json({ success: true, data: await OffersService.getReceivedOffers(req.user!.userId) });
+}));
 
-// GET /api/v1/offers/chain?listingId=&buyerId= — Get full offer chain for a listing-buyer pair
-offersRouter.get('/chain', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { listingId, buyerId } = req.query;
-    if (!listingId || !buyerId) {
-      res.status(400).json({ success: false, error: { code: 'MISSING_FIELDS', message: 'listingId and buyerId are required' } });
-      return;
-    }
-    const chain = await OffersService.getOfferChain(String(listingId), String(buyerId), req.user!.userId);
-    res.json({ success: true, data: chain });
-  } catch (err) {
-    next(err);
-  }
-});
+// Full negotiation history for a listing-buyer pair
+offersRouter.get('/chain', wrap(async (req, res) => {
+  const { listingId, buyerId } = chainQuerySchema.parse(req.query);
+  res.json({ success: true, data: await OffersService.getOfferChain(listingId, buyerId, req.user!.userId) });
+}));
 
-// GET /api/v1/offers/listing/:listingId — Seller: get all offers for a listing
-offersRouter.get('/listing/:listingId', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const offers = await OffersService.getListingOffers(req.params.listingId, req.user!.userId);
-    res.json({ success: true, data: offers });
-  } catch (err) {
-    next(err);
-  }
-});
+offersRouter.get('/listing/:listingId', wrap(async (req, res) => {
+  res.json({ success: true, data: await OffersService.getListingOffers(id.parse(req.params.listingId), req.user!.userId) });
+}));
 
-// POST /api/v1/offers/:id/counter — Counter an offer
-offersRouter.post('/:id/counter', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { amount, message } = req.body;
-    if (amount === undefined) {
-      res.status(400).json({ success: false, error: { code: 'MISSING_FIELDS', message: 'amount is required' } });
-      return;
-    }
-    const offer = await OffersService.counterOffer(req.params.id, req.user!.userId, { amount: Number(amount), message });
-    res.status(201).json({ success: true, data: offer });
-  } catch (err) {
-    next(err);
-  }
-});
+offersRouter.post('/:id/counter', requireActiveStatus, wrap(async (req, res) => {
+  const offer = await OffersService.counterOffer(id.parse(req.params.id), req.user!.userId, amountSchema.parse(req.body));
+  res.status(201).json({ success: true, data: offer });
+}));
 
-// POST /api/v1/offers/:id/accept — Seller accepts an offer
-offersRouter.post('/:id/accept', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const offer = await OffersService.acceptOffer(req.params.id, req.user!.userId);
-    res.json({ success: true, data: offer });
-  } catch (err) {
-    next(err);
-  }
-});
+offersRouter.post('/:id/accept', requireActiveStatus, wrap(async (req, res) => {
+  res.json({ success: true, data: await OffersService.acceptOffer(id.parse(req.params.id), req.user!.userId) });
+}));
 
-// POST /api/v1/offers/:id/reject — Seller or buyer rejects an offer
-offersRouter.post('/:id/reject', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const offer = await OffersService.rejectOffer(req.params.id, req.user!.userId);
-    res.json({ success: true, data: offer });
-  } catch (err) {
-    next(err);
-  }
-});
+offersRouter.post('/:id/reject', wrap(async (req, res) => {
+  res.json({ success: true, data: await OffersService.rejectOffer(id.parse(req.params.id), req.user!.userId) });
+}));
 
-// POST /api/v1/offers/:id/cancel — Buyer cancels their offer
-offersRouter.post('/:id/cancel', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const offer = await OffersService.cancelOffer(req.params.id, req.user!.userId);
-    res.json({ success: true, data: offer });
-  } catch (err) {
-    next(err);
-  }
-});
+offersRouter.post('/:id/cancel', wrap(async (req, res) => {
+  res.json({ success: true, data: await OffersService.cancelOffer(id.parse(req.params.id), req.user!.userId) });
+}));

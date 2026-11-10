@@ -1,60 +1,38 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
+import { z } from 'zod';
 import { ChatService } from './chat.service.js';
-import { authenticateToken } from '../../common/middleware/auth-guard.js';
+import { authenticateToken, requireActiveStatus } from '../../common/middleware/auth-guard.js';
+import { asyncHandler as wrap } from '../../common/async-handler.js';
+import { id } from '../../common/validation.js';
 
 export const chatRouter = Router();
 
-// Require authentication for all chat operations
+const initiateSchema = z.object({ listingId: id });
+const messageSchema = z.object({ content: z.string().trim().min(1, 'Message content cannot be empty').max(2000) });
+
 chatRouter.use(authenticateToken);
 
 // Start/get conversation for a listing
-chatRouter.post('/initiate', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { listingId } = req.body;
-    const conversation = await ChatService.getOrCreateConversation(listingId, req.user!.userId);
-    res.json({ success: true, data: conversation });
-  } catch (err) {
-    next(err);
-  }
-});
+chatRouter.post('/initiate', requireActiveStatus, wrap(async (req, res) => {
+  const { listingId } = initiateSchema.parse(req.body);
+  res.json({ success: true, data: await ChatService.getOrCreateConversation(listingId, req.user!.userId) });
+}));
 
-// Get user's conversation list
-chatRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const conversations = await ChatService.getUserConversations(req.user!.userId);
-    res.json({ success: true, data: conversations });
-  } catch (err) {
-    next(err);
-  }
-});
+chatRouter.get('/', wrap(async (req, res) => {
+  res.json({ success: true, data: await ChatService.getUserConversations(req.user!.userId) });
+}));
 
-// Get messages for a specific conversation
-chatRouter.get('/:id/messages', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await ChatService.getConversationMessages(req.params.id, req.user!.userId);
-    res.json({ success: true, data: result });
-  } catch (err) {
-    next(err);
-  }
-});
+chatRouter.get('/:id/messages', wrap(async (req, res) => {
+  res.json({ success: true, data: await ChatService.getConversationMessages(id.parse(req.params.id), req.user!.userId) });
+}));
 
-// Send a message in a conversation
-chatRouter.post('/:id/messages', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { content } = req.body;
-    const message = await ChatService.sendMessage(req.params.id, req.user!.userId, content);
-    res.status(201).json({ success: true, data: message });
-  } catch (err) {
-    next(err);
-  }
-});
+chatRouter.post('/:id/messages', requireActiveStatus, wrap(async (req, res) => {
+  const { content } = messageSchema.parse(req.body);
+  const message = await ChatService.sendMessage(id.parse(req.params.id), req.user!.userId, content);
+  res.status(201).json({ success: true, data: message });
+}));
 
-// Mark messages as read
-chatRouter.patch('/:id/read', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    await ChatService.markAsRead(req.params.id, req.user!.userId);
-    res.json({ success: true });
-  } catch (err) {
-    next(err);
-  }
-});
+chatRouter.patch('/:id/read', wrap(async (req, res) => {
+  await ChatService.markAsRead(id.parse(req.params.id), req.user!.userId);
+  res.json({ success: true });
+}));

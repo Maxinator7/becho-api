@@ -13,7 +13,7 @@ notificationsRouter.get('/', async (req: Request, res: Response, next: NextFunct
     const page = req.query.page ? Number(req.query.page) : 1;
     const limit = req.query.limit ? Number(req.query.limit) : 20;
     const result = await NotificationsService.getUserNotifications(req.user!.userId, page, limit);
-    res.json({ success: true, ...result });
+    res.json({ success: true, data: result });
   } catch (err) {
     next(err);
   }

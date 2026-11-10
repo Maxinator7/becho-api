@@ -1,238 +1,254 @@
-import { prisma } from './common/prisma.js';
 import bcrypt from 'bcryptjs';
+import { prisma } from './common/prisma.js';
+import { AttributeDataType, ListingStatus, UserRole, UserStatus } from './common/types/enums.js';
 
-async function seed() {
-  console.log('🌱 Starting database seed...');
+/**
+ * Idempotent seed for local development — India launch data.
+ * Demo login for every user: password "password123".
+ */
 
-  // 1. Seed Service Areas
-  await prisma.serviceArea.upsert({
-    where: { countryCode_stateCode_cityCode: { countryCode: 'US', stateCode: 'NY', cityCode: 'NYC' } },
-    update: {},
-    create: {
-      countryCode: 'US',
-      stateCode: 'NY',
-      stateName: 'New York',
-      cityCode: 'NYC',
-      cityName: 'New York City',
-      isActive: true,
-      buyingEnabled: true,
-      sellingEnabled: true,
-    },
-  });
+const SERVICE_AREAS = [
+  { stateCode: 'MH', stateName: 'Maharashtra', cityCode: 'MUM', cityName: 'Mumbai' },
+  { stateCode: 'MH', stateName: 'Maharashtra', cityCode: 'PUN', cityName: 'Pune' },
+  { stateCode: 'DL', stateName: 'Delhi', cityCode: 'DEL', cityName: 'New Delhi' },
+  { stateCode: 'KA', stateName: 'Karnataka', cityCode: 'BLR', cityName: 'Bengaluru' },
+  { stateCode: 'TG', stateName: 'Telangana', cityCode: 'HYD', cityName: 'Hyderabad' },
+  { stateCode: 'TN', stateName: 'Tamil Nadu', cityCode: 'CHE', cityName: 'Chennai' },
+  { stateCode: 'WB', stateName: 'West Bengal', cityCode: 'KOL', cityName: 'Kolkata' },
+  { stateCode: 'GJ', stateName: 'Gujarat', cityCode: 'AMD', cityName: 'Ahmedabad' },
+];
 
-  await prisma.serviceArea.upsert({
-    where: { countryCode_stateCode_cityCode: { countryCode: 'US', stateCode: 'CA', cityCode: 'LA' } },
-    update: {},
-    create: {
-      countryCode: 'US',
-      stateCode: 'CA',
-      stateName: 'California',
-      cityCode: 'LA',
-      cityName: 'Los Angeles',
-      isActive: true,
-      buyingEnabled: true,
-      sellingEnabled: true,
-    },
-  });
+type AttrSeed = { name: string; slug: string; dataType: string; isRequired?: boolean; options?: string[] };
+type CategorySeed = { name: string; slug: string; children?: (CategorySeed & { attributes?: AttrSeed[] })[] };
 
-  // 2. Seed Categories & Subcategories
-  let electronics = await prisma.category.findUnique({ where: { slug: 'electronics' } });
-  if (!electronics) {
-    electronics = await prisma.category.create({
-      data: { name: 'Electronics', slug: 'electronics', sortOrder: 1 },
-    });
-  }
-
-  let smartphones = await prisma.category.findUnique({ where: { slug: 'smartphones' } });
-  if (!smartphones) {
-    smartphones = await prisma.category.create({
-      data: { name: 'Smartphones & Mobile', slug: 'smartphones', parentId: electronics.id, sortOrder: 1 },
-    });
-  }
-
-  let laptops = await prisma.category.findUnique({ where: { slug: 'laptops' } });
-  if (!laptops) {
-    laptops = await prisma.category.create({
-      data: { name: 'Laptops & Computers', slug: 'laptops', parentId: electronics.id, sortOrder: 2 },
-    });
-  }
-
-  let vehicles = await prisma.category.findUnique({ where: { slug: 'vehicles' } });
-  if (!vehicles) {
-    vehicles = await prisma.category.create({
-      data: { name: 'Vehicles & Automotive', slug: 'vehicles', sortOrder: 2 },
-    });
-  }
-
-  let cars = await prisma.category.findUnique({ where: { slug: 'cars' } });
-  if (!cars) {
-    cars = await prisma.category.create({
-      data: { name: 'Cars & Trucks', slug: 'cars', parentId: vehicles.id, sortOrder: 1 },
-    });
-  }
-
-  let fashion = await prisma.category.findUnique({ where: { slug: 'fashion' } });
-  if (!fashion) {
-    fashion = await prisma.category.create({
-      data: { name: 'Fashion & Apparel', slug: 'fashion', sortOrder: 3 },
-    });
-  }
-
-  // 3. Seed Attribute Definitions
-  let storageAttr = await prisma.attributeDefinition.findFirst({
-    where: { categoryId: smartphones.id, slug: 'storage' },
-  });
-  if (!storageAttr) {
-    storageAttr = await prisma.attributeDefinition.create({
-      data: {
-        categoryId: smartphones.id,
-        name: 'Storage Capacity',
-        slug: 'storage',
-        dataType: 'SELECT',
-        isRequired: true,
-        isFilterable: true,
+const CATEGORIES: CategorySeed[] = [
+  {
+    name: 'Mobiles',
+    slug: 'mobiles',
+    children: [
+      {
+        name: 'Mobile Phones',
+        slug: 'mobile-phones',
+        attributes: [
+          { name: 'Brand', slug: 'brand', dataType: AttributeDataType.SELECT, isRequired: true, options: ['Apple', 'Samsung', 'Xiaomi', 'OnePlus', 'Vivo', 'Oppo', 'Realme', 'Google', 'Other'] },
+          { name: 'Storage', slug: 'storage', dataType: AttributeDataType.SELECT, isRequired: true, options: ['64 GB', '128 GB', '256 GB', '512 GB', '1 TB'] },
+        ],
       },
-    });
+      { name: 'Tablets', slug: 'tablets' },
+      { name: 'Mobile Accessories', slug: 'mobile-accessories' },
+    ],
+  },
+  {
+    name: 'Electronics & Appliances',
+    slug: 'electronics',
+    children: [
+      { name: 'Laptops & Computers', slug: 'laptops' },
+      { name: 'TVs, Video & Audio', slug: 'tv-audio' },
+      { name: 'Kitchen & Home Appliances', slug: 'home-appliances' },
+      { name: 'Cameras & Lenses', slug: 'cameras' },
+    ],
+  },
+  {
+    name: 'Vehicles',
+    slug: 'vehicles',
+    children: [
+      {
+        name: 'Cars',
+        slug: 'cars',
+        attributes: [
+          { name: 'Brand', slug: 'brand', dataType: AttributeDataType.SELECT, isRequired: true, options: ['Maruti Suzuki', 'Hyundai', 'Tata', 'Mahindra', 'Honda', 'Toyota', 'Kia', 'Other'] },
+          { name: 'Year', slug: 'year', dataType: AttributeDataType.NUMBER, isRequired: true },
+          { name: 'Fuel', slug: 'fuel', dataType: AttributeDataType.SELECT, isRequired: true, options: ['Petrol', 'Diesel', 'CNG', 'Electric', 'Hybrid'] },
+          { name: 'KM Driven', slug: 'km-driven', dataType: AttributeDataType.NUMBER },
+        ],
+      },
+      {
+        name: 'Motorcycles & Scooters',
+        slug: 'bikes',
+        attributes: [
+          { name: 'Brand', slug: 'brand', dataType: AttributeDataType.SELECT, isRequired: true, options: ['Hero', 'Honda', 'Bajaj', 'TVS', 'Royal Enfield', 'Yamaha', 'Ola Electric', 'Ather', 'Other'] },
+          { name: 'Year', slug: 'year', dataType: AttributeDataType.NUMBER, isRequired: true },
+        ],
+      },
+      { name: 'Bicycles', slug: 'bicycles' },
+    ],
+  },
+  {
+    name: 'Furniture',
+    slug: 'furniture',
+    children: [
+      { name: 'Sofas & Seating', slug: 'sofas' },
+      { name: 'Beds & Wardrobes', slug: 'beds-wardrobes' },
+      { name: 'Tables & Desks', slug: 'tables-desks' },
+    ],
+  },
+  {
+    name: 'Fashion',
+    slug: 'fashion',
+    children: [
+      { name: "Men's Clothing", slug: 'mens-clothing' },
+      { name: "Women's Clothing", slug: 'womens-clothing' },
+      { name: 'Footwear', slug: 'footwear' },
+    ],
+  },
+];
 
-    await prisma.attributeOption.createMany({
-      data: [
-        { attributeDefinitionId: storageAttr.id, label: '128 GB', value: '128GB', sortOrder: 1 },
-        { attributeDefinitionId: storageAttr.id, label: '256 GB', value: '256GB', sortOrder: 2 },
-        { attributeDefinitionId: storageAttr.id, label: '512 GB', value: '512GB', sortOrder: 3 },
-      ],
-    });
+async function upsertCategory(name: string, slug: string, sortOrder: number, parentId: string | null) {
+  return prisma.category.upsert({
+    where: { slug },
+    update: { name, sortOrder, parentId },
+    create: { name, slug, sortOrder, parentId },
+  });
+}
+
+async function seedCategories() {
+  for (const [i, top] of CATEGORIES.entries()) {
+    const parent = await upsertCategory(top.name, top.slug, i + 1, null);
+    for (const [j, child] of (top.children ?? []).entries()) {
+      const category = await upsertCategory(child.name, child.slug, j + 1, parent.id);
+      for (const [k, attr] of (child.attributes ?? []).entries()) {
+        const existing = await prisma.attributeDefinition.findUnique({
+          where: { categoryId_slug: { categoryId: category.id, slug: attr.slug } },
+        });
+        if (existing) continue;
+        await prisma.attributeDefinition.create({
+          data: {
+            categoryId: category.id,
+            name: attr.name,
+            slug: attr.slug,
+            dataType: attr.dataType,
+            isRequired: attr.isRequired ?? false,
+            sortOrder: k + 1,
+            options: attr.options
+              ? { create: attr.options.map((label, n) => ({ label, value: label.toLowerCase().replace(/\s+/g, '-'), sortOrder: n + 1 })) }
+              : undefined,
+          },
+        });
+      }
+    }
   }
+}
 
-  // 4. Seed Demo Users
+async function seedUsers() {
   const passwordHash = await bcrypt.hash('password123', 10);
-  const alexUser = await prisma.user.upsert({
-    where: { email: 'alex@example.com' },
-    update: {},
-    create: {
-      displayName: 'Alex Morgan',
-      email: 'alex@example.com',
-      passwordHash,
-      status: 'ACTIVE',
-      role: 'USER',
-    },
-  });
+  const users = [
+    { displayName: 'Aarav Sharma', email: 'aarav@example.com', phone: '+919876543210', role: UserRole.USER },
+    { displayName: 'Priya Iyer', email: 'priya@example.com', phone: '+919812345678', role: UserRole.USER },
+    { displayName: 'Becho Admin', email: 'admin@becho.in', phone: null, role: UserRole.ADMIN },
+  ];
+  const result: Record<string, string> = {};
+  for (const u of users) {
+    const user = await prisma.user.upsert({
+      where: { email: u.email },
+      update: {},
+      create: { ...u, passwordHash, status: UserStatus.ACTIVE, phoneVerifiedAt: u.phone ? new Date() : null, emailVerifiedAt: new Date() },
+    });
+    result[u.email] = user.id;
+  }
+  return result;
+}
 
-  const sarahUser = await prisma.user.upsert({
-    where: { email: 'sarah@example.com' },
-    update: {},
-    create: {
-      displayName: 'Sarah Jenkins',
-      email: 'sarah@example.com',
-      passwordHash,
-      status: 'ACTIVE',
-      role: 'USER',
-    },
-  });
+async function seedListings(userIds: Record<string, string>) {
+  const cat = async (slug: string) => (await prisma.category.findUniqueOrThrow({ where: { slug } })).id;
+  const attr = async (categorySlug: string, slug: string) =>
+    (await prisma.attributeDefinition.findUniqueOrThrow({ where: { categoryId_slug: { categoryId: await cat(categorySlug), slug } } })).id;
 
-  const adminUser = await prisma.user.upsert({
-    where: { email: 'admin@becho.com' },
-    update: {},
-    create: {
-      displayName: 'System Admin',
-      email: 'admin@becho.com',
-      passwordHash,
-      status: 'ACTIVE',
-      role: 'ADMIN',
-    },
-  });
-
-  // 5. Seed Sample Live Listings
-  const sampleListings = [
+  const day = 24 * 60 * 60 * 1000;
+  const listings = [
     {
-      title: 'iPhone 15 Pro Max 256GB Natural Titanium',
-      description: 'Brand new condition, unlocked, includes original box, braided USB-C cable, and AppleCare coverage until late 2026. Battery health 100%.',
-      price: 980,
-      condition: 'LIKE_NEW',
-      categoryId: smartphones.id,
-      subcategoryId: smartphones.id,
-      sellerId: alexUser.id,
-      cityCode: 'NYC',
-      stateCode: 'NY',
-      status: 'LIVE',
-      mediaUrl: 'https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=800',
+      title: 'iPhone 14 128GB Midnight, 1 year old',
+      description: 'Single owner, bill and box available. Battery health 89%. No scratches, always used with a cover and screen guard.',
+      price: 42000, condition: 'LIKE_NEW', category: 'mobile-phones', seller: 'aarav@example.com', stateCode: 'MH', cityCode: 'MUM',
+      image: 'https://images.unsplash.com/photo-1678652197831-2d180705cd2c?w=800',
+      attributes: [{ slug: 'brand', valueText: 'apple' }, { slug: 'storage', valueText: '128-gb' }],
     },
     {
-      title: 'MacBook Pro 16" M3 Max 36GB RAM 1TB SSD',
-      description: 'Space Black MacBook Pro 16-inch. Pristine condition with low cycle count. Perfect for video editing, software engineering, and heavy workloads.',
-      price: 2450,
-      condition: 'LIKE_NEW',
-      categoryId: laptops.id,
-      subcategoryId: laptops.id,
-      sellerId: sarahUser.id,
-      cityCode: 'NYC',
-      stateCode: 'NY',
-      status: 'LIVE',
-      mediaUrl: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=800',
+      title: 'Samsung Galaxy S23 256GB Phantom Black',
+      description: 'Excellent condition, under brand warranty till next year. Comes with original charger and two back covers.',
+      price: 48500, condition: 'USED', category: 'mobile-phones', seller: 'priya@example.com', stateCode: 'KA', cityCode: 'BLR',
+      image: 'https://images.unsplash.com/photo-1678911820864-e2c567c655d7?w=800',
+      attributes: [{ slug: 'brand', valueText: 'samsung' }, { slug: 'storage', valueText: '256-gb' }],
     },
     {
-      title: 'Sony WH-1000XM5 Wireless Noise Canceling Headphones',
-      description: 'Industry-leading noise cancellation with auto NC optimizer. Crystal clear hands-free calling and 30-hour battery life. Comes with hard carry case.',
-      price: 280,
-      condition: 'USED',
-      categoryId: electronics.id,
-      sellerId: alexUser.id,
-      cityCode: 'LA',
-      stateCode: 'CA',
-      status: 'LIVE',
-      mediaUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800',
+      title: 'Lenovo ThinkPad E14, i5 12th Gen, 16GB RAM, 512GB SSD',
+      description: 'Used for office work only. Very good keyboard and battery backup of about 5 hours. Charger included.',
+      price: 38000, condition: 'USED', category: 'laptops', seller: 'priya@example.com', stateCode: 'KA', cityCode: 'BLR',
+      image: 'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=800',
+      attributes: [],
     },
     {
-      title: 'Tesla Model 3 Long Range AWD (2023)',
-      description: 'Pearl White Multi-Coat with Black Interior. 18" Aero Wheels, Full Self-Driving Capability included. Clean title, single owner, 14,000 miles.',
-      price: 34500,
-      condition: 'USED',
-      categoryId: cars.id,
-      subcategoryId: cars.id,
-      sellerId: sarahUser.id,
-      cityCode: 'LA',
-      stateCode: 'CA',
-      status: 'LIVE',
-      mediaUrl: 'https://images.unsplash.com/photo-1560958089-b8a1929cea89?w=800',
+      title: 'Maruti Suzuki Swift VXi 2019, Petrol, 38,000 km',
+      description: 'First owner, all services at authorised service centre. Insurance valid till March. New tyres fitted last year.',
+      price: 525000, condition: 'USED', category: 'cars', seller: 'aarav@example.com', stateCode: 'MH', cityCode: 'PUN',
+      image: 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=800',
+      attributes: [{ slug: 'brand', valueText: 'maruti-suzuki' }, { slug: 'year', valueNumber: 2019 }, { slug: 'fuel', valueText: 'petrol' }, { slug: 'km-driven', valueNumber: 38000 }],
+    },
+    {
+      title: 'Royal Enfield Classic 350, 2021, Gunmetal Grey',
+      description: 'Well maintained, 14,000 km driven. All papers clear, single owner. Crash guard and touring seat installed.',
+      price: 155000, condition: 'USED', category: 'bikes', seller: 'priya@example.com', stateCode: 'DL', cityCode: 'DEL',
+      image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=800',
+      attributes: [{ slug: 'brand', valueText: 'royal-enfield' }, { slug: 'year', valueNumber: 2021 }],
+    },
+    {
+      title: '3-seater fabric sofa, grey, 2 years old',
+      description: 'Comfortable sofa in good condition, no stains or tears. Moving out of city so selling. Buyer to arrange pickup.',
+      price: 12000, condition: 'USED', category: 'sofas', seller: 'aarav@example.com', stateCode: 'MH', cityCode: 'MUM',
+      image: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=800',
+      attributes: [],
     },
   ];
 
-  for (const item of sampleListings) {
-    const existing = await prisma.listing.findFirst({ where: { title: item.title } });
-    if (!existing) {
-      const listing = await prisma.listing.create({
-        data: {
-          title: item.title,
-          description: item.description,
-          price: item.price,
-          condition: item.condition,
-          categoryId: item.categoryId,
-          subcategoryId: item.subcategoryId || null,
-          sellerId: item.sellerId,
-          cityCode: item.cityCode,
-          stateCode: item.stateCode,
-          countryCode: 'US',
-          status: item.status,
-          publishedAt: new Date(),
-          approvedAt: new Date(),
-        },
-      });
-
-      await prisma.listingMedia.create({
-        data: {
-          listingId: listing.id,
-          mediaType: 'IMAGE',
-          storageKey: `sample-${listing.id}`,
-          url: item.mediaUrl,
-          sortOrder: 1,
-        },
-      });
+  for (const item of listings) {
+    if (await prisma.listing.findFirst({ where: { title: item.title } })) continue;
+    const now = Date.now();
+    const categoryId = await cat(item.category);
+    const attributeRows = [];
+    for (const a of item.attributes) {
+      attributeRows.push({ attributeDefinitionId: await attr(item.category, a.slug), valueText: a.valueText ?? null, valueNumber: a.valueNumber ?? null });
     }
+    await prisma.listing.create({
+      data: {
+        sellerId: userIds[item.seller],
+        categoryId,
+        title: item.title,
+        description: item.description,
+        price: item.price,
+        currency: 'INR',
+        condition: item.condition,
+        countryCode: 'IN',
+        stateCode: item.stateCode,
+        cityCode: item.cityCode,
+        status: ListingStatus.LIVE,
+        submittedAt: new Date(now),
+        approvedAt: new Date(now),
+        publishedAt: new Date(now),
+        expiresAt: new Date(now + 30 * day),
+        media: { create: [{ url: item.image, storageKey: item.image, sortOrder: 1 }] },
+        attributes: { create: attributeRows },
+      },
+    });
   }
-
-  console.log('✅ Database successfully seeded!');
 }
 
-seed().catch((err) => {
-  console.error('❌ Seed error:', err);
-  process.exit(1);
-});
+async function seed() {
+  console.log('🌱 Seeding database (India)...');
+  for (const area of SERVICE_AREAS) {
+    await prisma.serviceArea.upsert({
+      where: { countryCode_stateCode_cityCode: { countryCode: 'IN', stateCode: area.stateCode, cityCode: area.cityCode } },
+      update: {},
+      create: { countryCode: 'IN', ...area, isActive: true, buyingEnabled: true, sellingEnabled: true },
+    });
+  }
+  await seedCategories();
+  const userIds = await seedUsers();
+  await seedListings(userIds);
+  console.log('✅ Seed complete. Demo logins (password "password123"): aarav@example.com, priya@example.com, admin@becho.in');
+}
+
+seed()
+  .catch((err) => {
+    console.error('❌ Seed error:', err);
+    process.exitCode = 1;
+  })
+  .finally(() => prisma.$disconnect());

@@ -34,6 +34,19 @@ export function authenticateToken(req: Request, _res: Response, next: NextFuncti
   }
 }
 
+/** Attaches req.user when a valid token is present, but never rejects the request. */
+export function optionalAuth(req: Request, _res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      req.user = jwt.verify(authHeader.split(' ')[1], env.JWT_SECRET) as AuthenticatedUser;
+    } catch {
+      // Invalid/expired token on a public route: treat as anonymous.
+    }
+  }
+  next();
+}
+
 export function requireRole(...roles: UserRole[]) {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user) {
@@ -51,7 +64,7 @@ export function requireActiveStatus(req: Request, _res: Response, next: NextFunc
     return next(ApiError.unauthorized('Authentication required', 'AUTH_REQUIRED'));
   }
   if (req.user.status !== UserStatus.ACTIVE) {
-    return next(ApiError.forbidden('Account verification or active status required', 'INACTIVE_ACCOUNT'));
+    return next(ApiError.forbidden('Please verify your account to continue', 'ACCOUNT_NOT_VERIFIED'));
   }
   next();
 }

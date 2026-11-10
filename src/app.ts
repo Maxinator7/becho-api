@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { env } from './config/env.js';
 import { requestLogger } from './common/middleware/request-logger.js';
 import { errorHandler } from './common/middleware/error-handler.js';
 import { healthRouter } from './routes/health.js';
@@ -18,10 +19,18 @@ import { ApiError } from './common/errors/api-error.js';
 export function createApp() {
   const app = express();
 
-  // Standard middleware
-  app.use(cors());
-  app.use(express.json());
-  app.use(requestLogger);
+  // Only allow configured browser origins. Requests without an Origin header
+  // (mobile apps, curl, server-to-server) are not affected by CORS.
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin || env.CORS_ORIGINS.includes(origin)) return callback(null, true);
+        return callback(null, false);
+      },
+    })
+  );
+  app.use(express.json({ limit: '1mb' }));
+  if (env.NODE_ENV !== 'test') app.use(requestLogger);
 
   // API v1 Routes
   app.use('/api/v1', healthRouter);

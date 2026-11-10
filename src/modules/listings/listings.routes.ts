@@ -1,109 +1,60 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
+import { asyncHandler as wrap } from '../../common/async-handler.js';
 import { ListingsService } from './listings.service.js';
-import { authenticateToken } from '../../common/middleware/auth-guard.js';
+import { authenticateToken, optionalAuth, requireActiveStatus } from '../../common/middleware/auth-guard.js';
+import { createListingSchema, listingQuerySchema, updateListingSchema } from './listings.schema.js';
+import { id } from '../../common/validation.js';
 
 export const listingsRouter = Router();
 
-// Public: Get live listings with filtering, search, and pagination
-listingsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { categoryId, subcategoryId, cityCode, stateCode, countryCode, minPrice, maxPrice, condition, search, sort, page, limit } = req.query;
-    const result = await ListingsService.getPublicListings({
-      categoryId: categoryId ? String(categoryId) : undefined,
-      subcategoryId: subcategoryId ? String(subcategoryId) : undefined,
-      cityCode: cityCode ? String(cityCode) : undefined,
-      stateCode: stateCode ? String(stateCode) : undefined,
-      countryCode: countryCode ? String(countryCode) : undefined,
-      minPrice: minPrice ? Number(minPrice) : undefined,
-      maxPrice: maxPrice ? Number(maxPrice) : undefined,
-      condition: condition ? String(condition) : undefined,
-      search: search ? String(search) : undefined,
-      sort: sort ? String(sort) : undefined,
-      page: page ? Number(page) : undefined,
-      limit: limit ? Number(limit) : undefined,
-    });
-    res.json({ success: true, ...result });
-  } catch (err) {
-    next(err);
-  }
-});
 
-// Authenticated Seller: Get own listings
-listingsRouter.get('/mine', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const listings = await ListingsService.getUserListings(req.user!.userId);
-    res.json({ success: true, data: listings });
-  } catch (err) {
-    next(err);
-  }
-});
+// Public: live listings with filtering, search, and pagination
+listingsRouter.get('/', wrap(async (req, res) => {
+  const result = await ListingsService.getPublicListings(listingQuerySchema.parse(req.query));
+  res.json({ success: true, data: result });
+}));
 
-// Public: Get single listing details
-listingsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const listing = await ListingsService.getListingById(req.params.id);
-    res.json({ success: true, data: listing });
-  } catch (err) {
-    next(err);
-  }
-});
+// Seller: own listings
+listingsRouter.get('/mine', authenticateToken, wrap(async (req, res) => {
+  res.json({ success: true, data: await ListingsService.getUserListings(req.user!.userId) });
+}));
 
-// Authenticated Seller: Create listing draft & submit
-listingsRouter.post('/', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const listing = await ListingsService.createListingDraft(req.user!.userId, req.body);
-    res.status(201).json({ success: true, data: listing });
-  } catch (err) {
-    next(err);
-  }
-});
+// Public for LIVE/RESERVED/SOLD; owner and moderators can also see other states.
+listingsRouter.get('/:id', optionalAuth, wrap(async (req, res) => {
+  res.json({ success: true, data: await ListingsService.getListingForViewer(id.parse(req.params.id), req.user) });
+}));
 
-// Authenticated Seller: Submit listing draft
-listingsRouter.post('/:id/submit', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const listing = await ListingsService.submitListing(req.params.id, req.user!.userId);
-    res.json({ success: true, data: listing });
-  } catch (err) {
-    next(err);
-  }
-});
+// Seller: create draft (verified accounts only)
+listingsRouter.post('/', authenticateToken, requireActiveStatus, wrap(async (req, res) => {
+  const listing = await ListingsService.createListingDraft(req.user!.userId, createListingSchema.parse(req.body));
+  res.status(201).json({ success: true, data: listing });
+}));
 
-// Authenticated Seller: Edit listing draft
-listingsRouter.patch('/:id', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const listing = await ListingsService.updateListingDraft(req.params.id, req.user!.userId, req.body);
-    res.json({ success: true, data: listing });
-  } catch (err) {
-    next(err);
-  }
-});
+// Seller: submit draft for automated checks / review
+listingsRouter.post('/:id/submit', authenticateToken, requireActiveStatus, wrap(async (req, res) => {
+  res.json({ success: true, data: await ListingsService.submitListing(id.parse(req.params.id), req.user!.userId) });
+}));
 
-// Authenticated Seller: Mark listing as sold
-listingsRouter.post('/:id/mark-sold', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const listing = await ListingsService.markListingSold(req.params.id, req.user!.userId);
-    res.json({ success: true, data: listing });
-  } catch (err) {
-    next(err);
-  }
-});
+// Seller: edit draft or rejected listing
+listingsRouter.patch('/:id', authenticateToken, requireActiveStatus, wrap(async (req, res) => {
+  const listing = await ListingsService.updateListingDraft(id.parse(req.params.id), req.user!.userId, updateListingSchema.parse(req.body));
+  res.json({ success: true, data: listing });
+}));
 
-// Authenticated Seller: Renew expired listing
-listingsRouter.post('/:id/renew', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const listing = await ListingsService.renewListing(req.params.id, req.user!.userId);
-    res.json({ success: true, data: listing });
-  } catch (err) {
-    next(err);
-  }
-});
+listingsRouter.post('/:id/mark-sold', authenticateToken, wrap(async (req, res) => {
+  res.json({ success: true, data: await ListingsService.markListingSold(id.parse(req.params.id), req.user!.userId) });
+}));
 
-// Authenticated Seller: Delete listing (soft delete)
-listingsRouter.delete('/:id', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await ListingsService.deleteListing(req.params.id, req.user!.userId);
-    res.json({ success: true, data: result });
-  } catch (err) {
-    next(err);
-  }
-});
+// Seller: release a reservation (accepted offer fell through) and put the listing back on sale
+listingsRouter.post('/:id/mark-available', authenticateToken, wrap(async (req, res) => {
+  res.json({ success: true, data: await ListingsService.markListingAvailable(id.parse(req.params.id), req.user!.userId) });
+}));
+
+listingsRouter.post('/:id/renew', authenticateToken, requireActiveStatus, wrap(async (req, res) => {
+  res.json({ success: true, data: await ListingsService.renewListing(id.parse(req.params.id), req.user!.userId) });
+}));
+
+// Seller: soft delete
+listingsRouter.delete('/:id', authenticateToken, wrap(async (req, res) => {
+  res.json({ success: true, data: await ListingsService.deleteListing(id.parse(req.params.id), req.user!.userId) });
+}));

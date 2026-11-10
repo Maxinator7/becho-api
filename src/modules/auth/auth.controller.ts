@@ -26,7 +26,16 @@ export class AuthController {
   static async verifyOtp(req: Request, res: Response, next: NextFunction) {
     try {
       const validated = verifyOtpSchema.parse(req.body);
-      const result = await AuthService.verifyOtp(validated);
+      const result = await AuthService.verifyOtp(req.user!.userId, validated);
+      res.json({ success: true, data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async resendOtp(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await AuthService.resendOtp(req.user!.userId);
       res.json({ success: true, data: result });
     } catch (err) {
       next(err);
@@ -46,7 +55,7 @@ export class AuthController {
   static async logout(req: Request, res: Response, next: NextFunction) {
     try {
       const { refreshToken } = req.body || {};
-      const result = await AuthService.logout(refreshToken);
+      const result = await AuthService.logout(typeof refreshToken === 'string' ? refreshToken : undefined);
       res.json({ success: true, data: result });
     } catch (err) {
       next(err);

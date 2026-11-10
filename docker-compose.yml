@@ -1,0 +1,24 @@
+# Local development database for becho-api.
+# Host port 5433 avoids clashing with any other Postgres already on 5432.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: becho-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: becho_user
+      POSTGRES_PASSWORD: becho_password
+      POSTGRES_DB: becho_db
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - becho_pgdata:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U becho_user -d becho_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  becho_pgdata:

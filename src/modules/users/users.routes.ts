@@ -1,24 +1,17 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
+import { z } from 'zod';
 import { UsersService } from './users.service.js';
 import { authenticateToken } from '../../common/middleware/auth-guard.js';
+import { asyncHandler as wrap } from '../../common/async-handler.js';
 
 export const usersRouter = Router();
 
-usersRouter.get('/me', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const user = await UsersService.getProfile(req.user!.userId);
-    res.json({ success: true, data: user });
-  } catch (err) {
-    next(err);
-  }
-});
+const updateProfileSchema = z.object({ displayName: z.string().trim().min(2).max(60).optional() });
 
-usersRouter.patch('/me', authenticateToken, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { displayName } = req.body;
-    const user = await UsersService.updateProfile(req.user!.userId, { displayName });
-    res.json({ success: true, data: user });
-  } catch (err) {
-    next(err);
-  }
-});
+usersRouter.get('/me', authenticateToken, wrap(async (req, res) => {
+  res.json({ success: true, data: await UsersService.getProfile(req.user!.userId) });
+}));
+
+usersRouter.patch('/me', authenticateToken, wrap(async (req, res) => {
+  res.json({ success: true, data: await UsersService.updateProfile(req.user!.userId, updateProfileSchema.parse(req.body)) });
+}));
