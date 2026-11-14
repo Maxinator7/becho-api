@@ -50,7 +50,7 @@ CORS doesn't apply to the mobile app.
 Render's disk is wiped on every restart, so uploaded media must go to R2. Until this is done the API stores files locally and they disappear on redeploy.
 
 1. **R2 → Create bucket**: name `becho-media`, location hint **Asia-Pacific**.
-2. Bucket → **Settings → Public access → R2.dev subdomain → Allow**. Copy the `https://pub-….r2.dev` URL. (Later: connect a custom domain such as `media.becho.in` instead; r2.dev is rate-limited and meant for testing.)
+2. Bucket → **Settings → Public access → R2.dev subdomain → Allow**. Copy the `https://pub-….r2.dev` URL. ⚠️ Not the "S3 API" URL (`https://<account>.r2.cloudflarestorage.com/...`) — that one is private and photos would not load. (Later: connect a custom domain such as `media.becho.in` instead; r2.dev is rate-limited and meant for testing.)
 3. Bucket → **Settings → CORS policy → Add**, so browsers can upload directly:
    ```json
    [
