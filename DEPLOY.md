@@ -29,7 +29,12 @@ This is a **test environment**. OTP codes are shown on screen (`EXPOSE_DEV_OTP=t
 cd becho-api
 DATABASE_URL='<neon string>' SEED_PASSWORD='<a non-default password>' npm run seed
 ```
-This creates the cities, categories, demo listings and three demo users: aarav@example.com, priya@example.com and admin@becho.in. Running it again is safe. The URL is public, so use a real password, not `password123`.
+This creates the cities, categories, demo listings and three demo users: aarav@example.com, priya@example.com and admin@becho.in. Running it again is safe (it does not change existing passwords). The URL is public, so use a real password, not `password123`.
+
+**Forgot a password?** Set a new one for any account (typed at a hidden prompt; signs out existing sessions):
+```bash
+DATABASE_URL='<neon string>' npm run user:set-password -- admin@becho.in
+```
 
 ## 4. Cloudflare: web
 1. **Workers & Pages → Create → Import a repository**, then pick `Maxinator7/becho-web`, branch `main`.
