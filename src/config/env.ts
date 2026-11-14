@@ -6,6 +6,8 @@ dotenv.config();
 const DEV_JWT_SECRET = 'becho_default_dev_jwt_secret_key_change_in_prod';
 const DEV_JWT_REFRESH_SECRET = 'becho_default_dev_jwt_refresh_secret_key_change_in_prod';
 
+const num = (fallback: string) => z.string().default(fallback).transform((val) => parseInt(val, 10)).pipe(z.number().int().nonnegative());
+
 const envSchema = z
   .object({
     PORT: z.string().default('4000').transform((val) => parseInt(val, 10)),
@@ -23,8 +25,35 @@ const envSchema = z
     EXPOSE_DEV_OTP: z.enum(['true', 'false']).optional(),
     // Rate limit on /auth endpoints: max requests per IP per 15 minutes.
     AUTH_RATE_LIMIT: z.string().default('30').transform((val) => parseInt(val, 10)),
+
+    // Public base URL of this API (used for locally stored media URLs). Render sets RENDER_EXTERNAL_URL.
+    PUBLIC_API_URL: z.string().url().optional(),
+    RENDER_EXTERNAL_URL: z.string().url().optional(),
+
+    // Media storage: "local" writes to disk (dev/tests; NOT persistent on Render), "r2" uses Cloudflare R2.
+    STORAGE_DRIVER: z.enum(['local', 'r2']).default('local'),
+    LOCAL_UPLOAD_DIR: z.string().default('./uploads'),
+    R2_ACCOUNT_ID: z.string().optional(),
+    R2_ACCESS_KEY_ID: z.string().optional(),
+    R2_SECRET_ACCESS_KEY: z.string().optional(),
+    R2_BUCKET: z.string().optional(),
+    R2_PUBLIC_URL: z.string().url().optional(), // e.g. https://pub-xxxx.r2.dev or https://media.example.com
+
+    // Media and posting limits
+    MEDIA_MAX_IMAGE_MB: num('5'),
+    MEDIA_MAX_VIDEO_MB: num('50'),
+    MEDIA_MAX_VIDEO_SECONDS: num('60'),
+    MEDIA_MAX_IMAGES_PER_LISTING: num('10'),
+    MEDIA_MAX_VIDEOS_PER_LISTING: num('1'),
+    MEDIA_UPLOADS_PER_DAY: num('100'),
+    LISTINGS_PER_DAY: num('5'),
   })
   .superRefine((cfg, ctx) => {
+    if (cfg.STORAGE_DRIVER === 'r2') {
+      for (const key of ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET', 'R2_PUBLIC_URL'] as const) {
+        if (!cfg[key]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required when STORAGE_DRIVER=r2` });
+      }
+    }
     if (cfg.NODE_ENV !== 'production') return;
     for (const key of ['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const) {
       const value = cfg[key];
@@ -47,4 +76,10 @@ export const exposeDevOtp = env.EXPOSE_DEV_OTP ? env.EXPOSE_DEV_OTP === 'true' :
 
 if (isProduction && exposeDevOtp) {
   console.warn('⚠️  EXPOSE_DEV_OTP is on: OTP codes are returned in API responses. Use for staging only.');
+}
+
+export const publicApiUrl = (env.PUBLIC_API_URL ?? env.RENDER_EXTERNAL_URL ?? `http://localhost:${env.PORT}`).replace(/\/$/, '');
+
+if (isProduction && env.STORAGE_DRIVER === 'local') {
+  console.warn('⚠️  STORAGE_DRIVER=local in production: uploaded media is lost on every restart/redeploy. Configure R2.');
 }

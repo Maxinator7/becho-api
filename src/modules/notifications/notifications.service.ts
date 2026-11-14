@@ -99,19 +99,75 @@ export class NotificationsService {
   // Convenience methods for specific notification types
   // ──────────────────────────────────────────────────
 
+  /** Adds the chat to open for an offer notification, so clicking it lands in the negotiation. */
+  private static async offerData(offerId: string, listingId: string) {
+    const offer = await prisma.offer.findUnique({ where: { id: offerId }, select: { buyerId: true } });
+    const conversation = offer
+      ? await prisma.conversation.findUnique({
+          where: { listingId_buyerId: { listingId, buyerId: offer.buyerId } },
+          select: { id: true },
+        })
+      : null;
+    return { offerId, listingId, conversationId: conversation?.id ?? null };
+  }
+
+  /**
+   * One unread notification per conversation: further messages update it ("3 new messages")
+   * instead of flooding the list.
+   */
   static async notifyMessageReceived(
     recipientId: string,
     senderName: string,
     listingTitle: string,
     conversationId: string
   ) {
+    const existing = await prisma.notification.findFirst({
+      where: {
+        userId: recipientId,
+        type: NotificationType.MESSAGE_RECEIVED,
+        isRead: false,
+        data: { path: ['conversationId'], equals: conversationId },
+      },
+    });
+    if (existing) {
+      const previous = (existing.data as { count?: number } | null)?.count ?? 1;
+      const count = previous + 1;
+      return prisma.notification.update({
+        where: { id: existing.id },
+        data: {
+          body: `${senderName} sent you ${count} new messages about "${listingTitle}"`,
+          data: { conversationId, count },
+          createdAt: new Date(),
+        },
+      });
+    }
     return this.createNotification(
       recipientId,
       NotificationType.MESSAGE_RECEIVED,
       'New Message',
       `${senderName} sent you a message about "${listingTitle}"`,
-      { conversationId }
+      { conversationId, count: 1 }
     );
+  }
+
+  /** Buyer whose reservation ended: either the seller sold the item or put it back on sale. */
+  static async notifyReservationEnded(
+    buyerId: string,
+    sellerName: string,
+    listingTitle: string,
+    listingId: string,
+    outcome: 'SOLD' | 'RELEASED'
+  ) {
+    const conversation = await prisma.conversation.findUnique({
+      where: { listingId_buyerId: { listingId, buyerId } },
+      select: { id: true },
+    });
+    return outcome === 'SOLD'
+      ? this.createNotification(buyerId, NotificationType.LISTING_SOLD, 'Item marked as sold',
+          `${sellerName} marked "${listingTitle}" as sold.`, { listingId, conversationId: conversation?.id ?? null })
+      : this.createNotification(buyerId, NotificationType.RESERVATION_RELEASED, 'Reservation cancelled',
+          `${sellerName} cancelled your reservation for "${listingTitle}". It is available again.`,
+          { listingId, conversationId: conversation?.id ?? null });
   }
 
   static async notifyOfferCreated(
@@ -127,7 +183,7 @@ export class NotificationsService {
       NotificationType.OFFER_CREATED,
       'New Offer Received',
       `${buyerName} offered ${money(amount)} for "${listingTitle}"`,
-      { offerId, listingId }
+      await this.offerData(offerId, listingId)
     );
   }
 
@@ -144,7 +200,7 @@ export class NotificationsService {
       NotificationType.OFFER_ACCEPTED,
       'Offer Accepted!',
       `${actorName} accepted your offer of ${money(amount)} for "${listingTitle}"`,
-      { offerId, listingId }
+      await this.offerData(offerId, listingId)
     );
   }
 
@@ -161,7 +217,7 @@ export class NotificationsService {
       NotificationType.OFFER_REJECTED,
       'Offer Declined',
       `${actorName} declined your offer of ${money(amount)} for "${listingTitle}"`,
-      { offerId, listingId }
+      await this.offerData(offerId, listingId)
     );
   }
 
@@ -178,7 +234,7 @@ export class NotificationsService {
       NotificationType.OFFER_COUNTERED,
       'Counter Offer',
       `${counterpartyName} countered with ${money(amount)} for "${listingTitle}"`,
-      { offerId, listingId }
+      await this.offerData(offerId, listingId)
     );
   }
 

@@ -32,3 +32,7 @@ services:
         value: "true"
       - key: JOBS_INTERVAL_MINUTES
         value: "15"
+      # Media storage — add these in the Render dashboard once the R2 bucket exists (see DEPLOY.md):
+      #   STORAGE_DRIVER=r2, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_URL
+      # Limits (defaults shown): MEDIA_MAX_IMAGE_MB=5, MEDIA_MAX_VIDEO_MB=50, MEDIA_MAX_VIDEO_SECONDS=60,
+      #   MEDIA_MAX_IMAGES_PER_LISTING=10, MEDIA_MAX_VIDEOS_PER_LISTING=1, MEDIA_UPLOADS_PER_DAY=100, LISTINGS_PER_DAY=5

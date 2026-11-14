@@ -2,10 +2,13 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../common/prisma.js';
 import { ApiError } from '../../common/errors/api-error.js';
 import { AuthenticatedUser } from '../../common/middleware/auth-guard.js';
-import { ListingStatus, MediaType, OfferStatus, SanitizationStatus, UserRole } from '../../common/types/enums.js';
+import { ListingStatus, OfferStatus, SanitizationStatus, UserRole } from '../../common/types/enums.js';
 import { SanitizationEngine } from '../sanitization/sanitization.engine.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { ConversationEvent, postConversationEvent } from '../chat/conversation-events.js';
 import { CreateListingInput, ListingQuery, UpdateListingInput } from './listings.schema.js';
+import { MediaService } from '../media/media.service.js';
+import { env } from '../../config/env.js';
 
 export const LISTING_TTL_DAYS = 30;
 const LISTING_TTL_MS = LISTING_TTL_DAYS * 24 * 60 * 60 * 1000;
@@ -26,7 +29,6 @@ const listingDetailInclude = {
 } satisfies Prisma.ListingInclude;
 
 type AttributeInput = CreateListingInput['attributes'][number];
-type MediaInput = CreateListingInput['media'][number];
 
 function toAttributeRows(attributes: AttributeInput[]) {
   return attributes.map((attr) => ({
@@ -38,15 +40,6 @@ function toAttributeRows(attributes: AttributeInput[]) {
   }));
 }
 
-function toMediaRows(media: MediaInput[]) {
-  return media.map((item, i) => ({
-    mediaType: MediaType.IMAGE,
-    storageKey: item.storageKey || item.url,
-    url: item.url,
-    mimeType: item.mimeType || 'image/jpeg',
-    sortOrder: i + 1,
-  }));
-}
 
 export class ListingsService {
   // ───────────────────────── validation helpers ─────────────────────────
@@ -132,27 +125,42 @@ export class ListingsService {
 
   // ───────────────────────── seller operations ─────────────────────────
 
+  /** Rolling 24h cap on new listings per seller (deleted ones count too, to stop create/delete spam). */
+  private static async assertDailyListingLimit(sellerId: string) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const count = await prisma.listing.count({ where: { sellerId, createdAt: { gte: since } } });
+    if (count >= env.LISTINGS_PER_DAY) {
+      throw ApiError.tooManyRequests(`You can post at most ${env.LISTINGS_PER_DAY} listings per day. Please try again tomorrow.`, 'LISTING_DAILY_LIMIT');
+    }
+  }
+
   static async createListingDraft(sellerId: string, input: CreateListingInput) {
+    await this.assertDailyListingLimit(sellerId);
     await this.assertCategory(input.categoryId);
     await this.assertSellingArea(input.countryCode, input.stateCode, input.cityCode);
     await this.assertAttributes(input.categoryId, input.attributes, false);
+    const media = await MediaService.resolveListingMedia(sellerId, input.media);
 
-    const listing = await prisma.listing.create({
-      data: {
-        sellerId,
-        categoryId: input.categoryId,
-        title: input.title,
-        description: input.description,
-        price: input.price,
-        condition: input.condition,
-        countryCode: input.countryCode,
-        stateCode: input.stateCode,
-        cityCode: input.cityCode,
-        metadata: (input.metadata as Prisma.InputJsonValue) ?? undefined,
-        status: ListingStatus.DRAFT,
-        attributes: { create: toAttributeRows(input.attributes) },
-        media: { create: toMediaRows(input.media) },
-      },
+    const listing = await prisma.$transaction(async (tx) => {
+      const created = await tx.listing.create({
+        data: {
+          sellerId,
+          categoryId: input.categoryId,
+          title: input.title,
+          description: input.description,
+          price: input.price,
+          condition: input.condition,
+          countryCode: input.countryCode,
+          stateCode: input.stateCode,
+          cityCode: input.cityCode,
+          metadata: (input.metadata as Prisma.InputJsonValue) ?? undefined,
+          status: ListingStatus.DRAFT,
+          attributes: { create: toAttributeRows(input.attributes) },
+          media: { create: media.rows },
+        },
+      });
+      await MediaService.markAttached(tx, media.uploadIds, created.id);
+      return created;
     });
 
     return this.getListingById(listing.id);
@@ -198,6 +206,7 @@ export class ListingsService {
     if (input.attributes) await this.assertAttributes(categoryId, input.attributes, false);
 
     const { attributes, media, metadata, ...fields } = input;
+    const resolvedMedia = media ? await MediaService.resolveListingMedia(sellerId, media, listingId) : null;
 
     await prisma.$transaction(async (tx) => {
       await tx.listing.update({
@@ -213,11 +222,14 @@ export class ListingsService {
         await tx.listingAttribute.deleteMany({ where: { listingId } });
         await tx.listingAttribute.createMany({ data: toAttributeRows(attributes).map((a) => ({ ...a, listingId })) });
       }
-      if (media) {
+      if (resolvedMedia) {
         await tx.listingMedia.deleteMany({ where: { listingId } });
-        await tx.listingMedia.createMany({ data: toMediaRows(media).map((m) => ({ ...m, listingId })) });
+        await tx.listingMedia.createMany({ data: resolvedMedia.rows.map((m) => ({ ...m, listingId })) });
+        await MediaService.markAttached(tx, resolvedMedia.uploadIds, listingId);
       }
     });
+    // Files dropped in this edit are deleted from storage.
+    if (resolvedMedia) await MediaService.releaseRemoved(listingId, resolvedMedia.uploadIds);
 
     return this.getListingById(listingId);
   }
@@ -229,11 +241,27 @@ export class ListingsService {
       throw ApiError.badRequest('Only live or reserved listings can be marked as sold', 'LISTING_NOT_LIVE');
     }
 
-    await prisma.$transaction([
-      prisma.listing.update({ where: { id: listingId }, data: { status: ListingStatus.SOLD, soldAt: new Date() } }),
-      prisma.offer.updateMany({ where: { listingId, status: OfferStatus.PENDING }, data: { status: OfferStatus.REJECTED } }),
-      prisma.auditLog.create({ data: { actorId: sellerId, action: 'LISTING_MARKED_SOLD', targetType: 'LISTING', targetId: listingId } }),
-    ]);
+    await prisma.$transaction(async (tx) => {
+      await tx.listing.update({ where: { id: listingId }, data: { status: ListingStatus.SOLD, soldAt: new Date() } });
+      await tx.offer.updateMany({ where: { listingId, status: OfferStatus.PENDING }, data: { status: OfferStatus.REJECTED } });
+      await tx.auditLog.create({ data: { actorId: sellerId, action: 'LISTING_MARKED_SOLD', targetType: 'LISTING', targetId: listingId } });
+      // Tell the buyer the deal was reserved for (if any) in their chat.
+      const accepted = await tx.offer.findFirst({
+        where: { listingId, status: OfferStatus.ACCEPTED },
+        include: { seller: { select: { displayName: true } } },
+      });
+      if (accepted) {
+        await postConversationEvent({
+          listingId, buyerId: accepted.buyerId, sellerId, actorId: sellerId, actorName: accepted.seller.displayName,
+          event: ConversationEvent.LISTING_SOLD, amount: accepted.amount, offerId: accepted.id,
+        }, tx);
+      }
+      return accepted;
+    }).then((accepted) => {
+      if (accepted) {
+        NotificationsService.notifyReservationEnded(accepted.buyerId, accepted.seller.displayName, listing.title, listingId, 'SOLD').catch(() => {});
+      }
+    });
 
     return this.getListingById(listingId);
   }
@@ -245,11 +273,26 @@ export class ListingsService {
       throw ApiError.badRequest('Only reserved listings can be made available again', 'LISTING_NOT_RESERVED');
     }
 
-    await prisma.$transaction([
-      prisma.listing.update({ where: { id: listingId }, data: { status: ListingStatus.LIVE, reservedAt: null } }),
-      prisma.offer.updateMany({ where: { listingId, status: OfferStatus.ACCEPTED }, data: { status: OfferStatus.CANCELLED } }),
-      prisma.auditLog.create({ data: { actorId: sellerId, action: 'LISTING_RESERVATION_RELEASED', targetType: 'LISTING', targetId: listingId } }),
-    ]);
+    await prisma.$transaction(async (tx) => {
+      const accepted = await tx.offer.findFirst({
+        where: { listingId, status: OfferStatus.ACCEPTED },
+        include: { seller: { select: { displayName: true } } },
+      });
+      await tx.listing.update({ where: { id: listingId }, data: { status: ListingStatus.LIVE, reservedAt: null } });
+      await tx.offer.updateMany({ where: { listingId, status: OfferStatus.ACCEPTED }, data: { status: OfferStatus.CANCELLED } });
+      await tx.auditLog.create({ data: { actorId: sellerId, action: 'LISTING_RESERVATION_RELEASED', targetType: 'LISTING', targetId: listingId } });
+      if (accepted) {
+        await postConversationEvent({
+          listingId, buyerId: accepted.buyerId, sellerId, actorId: sellerId, actorName: accepted.seller.displayName,
+          event: ConversationEvent.RESERVATION_RELEASED, amount: accepted.amount, offerId: accepted.id,
+        }, tx);
+      }
+      return accepted;
+    }).then((accepted) => {
+      if (accepted) {
+        NotificationsService.notifyReservationEnded(accepted.buyerId, accepted.seller.displayName, listing.title, listingId, 'RELEASED').catch(() => {});
+      }
+    });
 
     return this.getListingById(listingId);
   }

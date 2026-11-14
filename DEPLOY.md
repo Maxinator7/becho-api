@@ -46,6 +46,30 @@ EXPO_PUBLIC_API_URL=https://<service>.onrender.com/api/v1 npx expo start
 ```
 CORS doesn't apply to the mobile app.
 
+## 6. Cloudflare R2: photo and video storage
+Render's disk is wiped on every restart, so uploaded media must go to R2. Until this is done the API stores files locally and they disappear on redeploy.
+
+1. **R2 → Create bucket**: name `becho-media`, location hint **Asia-Pacific**.
+2. Bucket → **Settings → Public access → R2.dev subdomain → Allow**. Copy the `https://pub-….r2.dev` URL. (Later: connect a custom domain such as `media.becho.in` instead; r2.dev is rate-limited and meant for testing.)
+3. Bucket → **Settings → CORS policy → Add**, so browsers can upload directly:
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://becho-web.gautamwarmachine68.workers.dev", "http://localhost:3000"],
+       "AllowedMethods": ["PUT", "GET", "HEAD"],
+       "AllowedHeaders": ["Content-Type"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+4. **R2 → Manage API tokens → Create API token**: permission **Object Read & Write**, limited to the `becho-media` bucket. Copy the Access Key ID and Secret Access Key (shown once). The Account ID is on the R2 overview page.
+5. Render → becho-api → **Environment**, add:
+   `STORAGE_DRIVER=r2`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET=becho-media`, `R2_PUBLIC_URL=https://pub-….r2.dev`
+
+The API refuses to start if `STORAGE_DRIVER=r2` and any R2 value is missing, so a typo shows up in the Render logs immediately.
+
+**Limits** (env vars on Render, defaults in brackets): photo size `MEDIA_MAX_IMAGE_MB` (5), video size `MEDIA_MAX_VIDEO_MB` (50), video length `MEDIA_MAX_VIDEO_SECONDS` (60), photos per listing `MEDIA_MAX_IMAGES_PER_LISTING` (10), videos per listing `MEDIA_MAX_VIDEOS_PER_LISTING` (1), uploads per user per day `MEDIA_UPLOADS_PER_DAY` (100), new listings per user per day `LISTINGS_PER_DAY` (5). Uploads never attached to a listing are deleted after 24 hours.
+
 ## Known limits of this setup
 - **Cold starts:** the API sleeps when idle, and the first request after that takes about a minute. Render Starter ($7/month) removes this.
 - **Background jobs only run while the API is awake.** The in-process scheduler expires listings and offers. Expiry catches up on the next wake-up.

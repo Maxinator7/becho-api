@@ -6,3 +6,6 @@ dist/
 coverage/
 prisma/*.db
 prisma/*.db-journal
+
+# Local media uploads (STORAGE_DRIVER=local)
+uploads/

@@ -1,11 +1,13 @@
 import { ListingsService } from '../modules/listings/listings.service.js';
 import { OffersService } from '../modules/offers/offers.service.js';
+import { MediaService } from '../modules/media/media.service.js';
 
 /** Runs all periodic maintenance jobs once. Exported so tests/ops can trigger it directly. */
 export async function runMaintenanceJobs() {
   const listings = await ListingsService.expireListings();
   const offers = await OffersService.expireOffers();
-  return { expiredListings: listings.expiredCount, expiredOffers: offers.expiredCount };
+  const uploads = await MediaService.cleanupAbandonedUploads();
+  return { expiredListings: listings.expiredCount, expiredOffers: offers.expiredCount, deletedUploads: uploads.deletedCount };
 }
 
 /**
@@ -19,8 +21,8 @@ export function startScheduler(intervalMinutes: number) {
     running = true;
     try {
       const result = await runMaintenanceJobs();
-      if (result.expiredListings || result.expiredOffers) {
-        console.log(`[jobs] expired ${result.expiredListings} listing(s), ${result.expiredOffers} offer(s)`);
+      if (result.expiredListings || result.expiredOffers || result.deletedUploads) {
+        console.log(`[jobs] expired ${result.expiredListings} listing(s), ${result.expiredOffers} offer(s); deleted ${result.deletedUploads} abandoned upload(s)`);
       }
     } catch (err) {
       console.error('[jobs] maintenance run failed:', err);

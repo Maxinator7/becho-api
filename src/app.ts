@@ -16,6 +16,8 @@ import { offersRouter } from './modules/offers/offers.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 import { ApiError } from './common/errors/api-error.js';
 import { apiRateLimit, authRateLimit } from './common/middleware/rate-limit.js';
+import { mediaRouter } from './modules/media/media.routes.js';
+import { LOCAL_FILES_ROUTE, localUploadRoot } from './modules/media/storage.js';
 
 export function createApp() {
   const app = express();
@@ -49,6 +51,12 @@ export function createApp() {
   app.use('/api/v1/favorites', favoritesRouter);
   app.use('/api/v1/offers', offersRouter);
   app.use('/api/v1/notifications', notificationsRouter);
+  app.use('/api/v1/media', mediaRouter);
+
+  // Files stored by the local-disk driver (development/tests). In R2 mode files are served by R2.
+  if (env.STORAGE_DRIVER === 'local') {
+    app.use(LOCAL_FILES_ROUTE, express.static(localUploadRoot, { fallthrough: false, maxAge: '1d' }));
+  }
 
   // 404 fallback for unknown routes
   app.use((_req, _res, next) => {

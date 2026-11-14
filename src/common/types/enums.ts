@@ -95,6 +95,8 @@ export const NotificationType = {
   OFFER_ACCEPTED: 'OFFER_ACCEPTED',
   OFFER_REJECTED: 'OFFER_REJECTED',
   OFFER_COUNTERED: 'OFFER_COUNTERED',
+  LISTING_SOLD: 'LISTING_SOLD',
+  RESERVATION_RELEASED: 'RESERVATION_RELEASED',
 } as const;
 export type NotificationType = typeof NotificationType[keyof typeof NotificationType];
 

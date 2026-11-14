@@ -11,11 +11,16 @@ const attributeValue = z.object({
   valueJson: z.unknown().optional(),
 });
 
-const mediaItem = z.object({
-  url: z.string().url('Image URL must be a valid http(s) URL').regex(/^https?:\/\//, 'Image URL must be http(s)'),
-  storageKey: z.string().min(1).max(300).optional(),
-  mimeType: z.string().max(100).optional(),
-});
+const mediaItem = z.union([
+  // Uploaded via POST /media/uploads (photos and videos).
+  z.object({ uploadId: id }),
+  // Legacy: external image link (older mobile builds).
+  z.object({
+    url: z.string().url('Image URL must be a valid http(s) URL').regex(/^https?:\/\//, 'Image URL must be http(s)'),
+    storageKey: z.string().min(1).max(300).optional(),
+    mimeType: z.string().max(100).optional(),
+  }),
+]);
 
 const listingFields = {
   categoryId: id,
@@ -27,7 +32,8 @@ const listingFields = {
   stateCode: z.string().trim().min(1, 'State is required').max(10).toUpperCase(),
   cityCode: z.string().trim().min(1, 'City is required').max(20).toUpperCase(),
   attributes: z.array(attributeValue).max(50).default([]),
-  media: z.array(mediaItem).max(10, 'At most 10 images').default([]),
+  // Per-type limits (photos/videos) are checked in MediaService; this is just an upper bound.
+  media: z.array(mediaItem).max(20, 'Too many media files').default([]),
   // Arbitrary extra details for categories that don't have a fixed schema (JSONB).
   metadata: z.record(z.unknown()).optional(),
 };

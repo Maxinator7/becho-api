@@ -3,6 +3,7 @@ import { prisma } from '../../common/prisma.js';
 import { ApiError } from '../../common/errors/api-error.js';
 import { ListingStatus, OfferStatus } from '../../common/types/enums.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { ConversationEvent, postConversationEvent } from '../chat/conversation-events.js';
 
 const OFFER_EXPIRY_HOURS = 48;
 const offerExpiry = () => new Date(Date.now() + OFFER_EXPIRY_HOURS * 60 * 60 * 1000);
@@ -70,7 +71,7 @@ export class OffersService {
         where: { listingId: listing.id, buyerId, status: OfferStatus.PENDING },
         data: { status: OfferStatus.CANCELLED },
       });
-      return tx.offer.create({
+      const created = await tx.offer.create({
         data: {
           listingId: listing.id,
           buyerId,
@@ -83,6 +84,11 @@ export class OffersService {
         },
         include: offerInclude,
       });
+      await postConversationEvent({
+        listingId: created.listingId, buyerId, sellerId: created.sellerId, actorId: buyerId,
+        actorName: created.buyer.displayName, event: ConversationEvent.OFFER_MADE, amount: created.amount, offerId: created.id,
+      }, tx);
+      return created;
     });
 
     NotificationsService.notifyOfferCreated(
@@ -105,7 +111,7 @@ export class OffersService {
       });
       if (count === 0) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
 
-      return tx.offer.create({
+      const created = await tx.offer.create({
         data: {
           listingId: offer.listingId,
           buyerId: offer.buyerId,
@@ -119,6 +125,11 @@ export class OffersService {
         },
         include: offerInclude,
       });
+      await postConversationEvent({
+        listingId: created.listingId, buyerId: created.buyerId, sellerId: created.sellerId, actorId,
+        actorName: created.proposedBy.displayName, event: ConversationEvent.OFFER_COUNTERED, amount: created.amount, offerId: created.id,
+      }, tx);
+      return created;
     });
 
     const recipientId = actorId === offer.sellerId ? offer.buyerId : offer.sellerId;
@@ -154,7 +165,7 @@ export class OffersService {
 
       const competing = await tx.offer.findMany({
         where: { listingId: offer.listingId, status: OfferStatus.PENDING, id: { not: offerId } },
-        select: { id: true, buyerId: true, amount: true },
+        select: { id: true, buyerId: true, sellerId: true, amount: true },
       });
       await tx.offer.updateMany({
         where: { id: { in: competing.map((o) => o.id) } },
@@ -171,7 +182,21 @@ export class OffersService {
         },
       });
 
-      return { accepted: await tx.offer.findUniqueOrThrow({ where: { id: offerId }, include: offerInclude }), competing };
+      const accepted = await tx.offer.findUniqueOrThrow({ where: { id: offerId }, include: offerInclude });
+      const actorName = actorId === accepted.sellerId ? accepted.seller.displayName : accepted.buyer.displayName;
+      await postConversationEvent({
+        listingId: accepted.listingId, buyerId: accepted.buyerId, sellerId: accepted.sellerId, actorId,
+        actorName, event: ConversationEvent.OFFER_ACCEPTED, amount: accepted.amount, offerId,
+      }, tx);
+      // Other buyers' open offers are closed because the item is now reserved for someone else.
+      for (const other of competing) {
+        await postConversationEvent({
+          listingId: offer.listingId, buyerId: other.buyerId, sellerId: other.sellerId, actorId: other.sellerId,
+          actorName: accepted.seller.displayName, event: ConversationEvent.OFFER_REJECTED, amount: other.amount, offerId: other.id,
+        }, tx);
+      }
+
+      return { accepted, competing };
     });
 
     const actorName = actorId === accepted.sellerId ? accepted.seller.displayName : accepted.buyer.displayName;
@@ -192,13 +217,18 @@ export class OffersService {
     const offer = await this.getPendingOffer(offerId);
     this.assertResponder(offer, actorId);
 
-    const updated = await prisma.offer.update({
-      where: { id: offerId },
-      data: { status: OfferStatus.REJECTED },
-      include: offerInclude,
+    const actorName = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.offer.updateMany({ where: { id: offerId, status: OfferStatus.PENDING }, data: { status: OfferStatus.REJECTED } });
+      if (count === 0) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
+      const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId }, select: { displayName: true } });
+      await postConversationEvent({
+        listingId: offer.listingId, buyerId: offer.buyerId, sellerId: offer.sellerId, actorId,
+        actorName: actor.displayName, event: ConversationEvent.OFFER_REJECTED, amount: offer.amount, offerId,
+      }, tx);
+      return actor.displayName;
     });
+    const updated = await prisma.offer.findUniqueOrThrow({ where: { id: offerId }, include: offerInclude });
 
-    const actorName = actorId === updated.sellerId ? updated.seller.displayName : updated.buyer.displayName;
     NotificationsService.notifyOfferRejected(
       updated.proposedById, actorName, updated.amount, updated.listing.title, updated.id, updated.listingId
     ).catch(() => {});
@@ -213,7 +243,16 @@ export class OffersService {
     if (offer.proposedById !== actorId) throw ApiError.forbidden('Only the person who made this offer can withdraw it', 'FORBIDDEN');
     if (offer.status !== OfferStatus.PENDING) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
 
-    return prisma.offer.update({ where: { id: offerId }, data: { status: OfferStatus.CANCELLED }, include: offerInclude });
+    await prisma.$transaction(async (tx) => {
+      const { count } = await tx.offer.updateMany({ where: { id: offerId, status: OfferStatus.PENDING }, data: { status: OfferStatus.CANCELLED } });
+      if (count === 0) throw ApiError.badRequest('Offer is no longer active', 'OFFER_NOT_PENDING');
+      const actor = await tx.user.findUniqueOrThrow({ where: { id: actorId }, select: { displayName: true } });
+      await postConversationEvent({
+        listingId: offer.listingId, buyerId: offer.buyerId, sellerId: offer.sellerId, actorId,
+        actorName: actor.displayName, event: ConversationEvent.OFFER_WITHDRAWN, amount: offer.amount, offerId,
+      }, tx);
+    });
+    return prisma.offer.findUniqueOrThrow({ where: { id: offerId }, include: offerInclude });
   }
 
   // ───────────────────────── reads ─────────────────────────
