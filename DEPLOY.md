@@ -34,10 +34,10 @@ This creates the cities, categories, demo listings and three demo users: aarav@e
 ## 4. Cloudflare: web
 1. **Workers & Pages → Create → Import a repository**, then pick `Maxinator7/becho-web`, branch `main`.
 2. Build command `npm run build`; deploy command `npx wrangler deploy` (the default). `wrangler.jsonc` tells it to serve `dist/` as a single-page app.
-3. **Settings → Build → Variables and secrets** (build-time, not runtime): `VITE_API_URL=https://<service>.onrender.com/api/v1`, `NODE_VERSION=20`.
+3. The API URL comes from `becho-web/.env.production` (committed; it is public in the bundle anyway). Node 20 comes from `.nvmrc`. No Cloudflare variables are needed, and a static-assets Worker can't have runtime variables anyway.
 4. Copy the `*.workers.dev` URL into Render's `CORS_ORIGINS` (Render restarts automatically).
 
-`VITE_API_URL` is built into the bundle, so after changing it, redeploy (Deployments → retry, or push a commit).
+To point the web at another API, edit `.env.production` and push.
 
 ## 5. Mobile: Expo Go
 ```bash
