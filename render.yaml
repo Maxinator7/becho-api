@@ -1,0 +1,34 @@
+# Render Blueprint for the Becho staging API (free plan).
+# Render dashboard → New → Blueprint → pick this repo. Values marked sync:false are
+# asked for during setup (paste the Neon connection string and the web URL).
+services:
+  - type: web
+    name: becho-api
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    # Dev deps (typescript, prisma CLI) are needed to build even though NODE_ENV=production.
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    # Free plan has no pre-deploy step, so migrations run on every start (idempotent).
+    startCommand: npx prisma migrate deploy && node dist/server.js
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false # Neon connection string, must include ?sslmode=require
+      - key: CORS_ORIGINS
+        sync: false # e.g. https://becho-web.pages.dev (comma-separate several)
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      # Staging only: show OTP codes on screen until an SMS provider (with DLT) is set up.
+      - key: EXPOSE_DEV_OTP
+        value: "true"
+      - key: JOBS_INTERVAL_MINUTES
+        value: "15"

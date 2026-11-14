@@ -18,6 +18,11 @@ const envSchema = z
     JWT_SECRET: z.string().default(DEV_JWT_SECRET),
     JWT_REFRESH_SECRET: z.string().default(DEV_JWT_REFRESH_SECRET),
     JOBS_INTERVAL_MINUTES: z.string().default('15').transform((val) => parseInt(val, 10)),
+    // Return OTP codes in API responses (shown on screen) instead of sending SMS.
+    // Defaults to on outside production. Set to "true" on staging until an SMS provider exists.
+    EXPOSE_DEV_OTP: z.enum(['true', 'false']).optional(),
+    // Rate limit on /auth endpoints: max requests per IP per 15 minutes.
+    AUTH_RATE_LIMIT: z.string().default('30').transform((val) => parseInt(val, 10)),
   })
   .superRefine((cfg, ctx) => {
     if (cfg.NODE_ENV !== 'production') return;
@@ -38,3 +43,8 @@ if (!_env.success) {
 
 export const env = _env.data;
 export const isProduction = env.NODE_ENV === 'production';
+export const exposeDevOtp = env.EXPOSE_DEV_OTP ? env.EXPOSE_DEV_OTP === 'true' : !isProduction;
+
+if (isProduction && exposeDevOtp) {
+  console.warn('⚠️  EXPOSE_DEV_OTP is on: OTP codes are returned in API responses. Use for staging only.');
+}

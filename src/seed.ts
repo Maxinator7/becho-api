@@ -130,7 +130,8 @@ async function seedCategories() {
 }
 
 async function seedUsers() {
-  const passwordHash = await bcrypt.hash('password123', 10);
+  // Override on any shared/public environment: SEED_PASSWORD=... npm run seed
+  const passwordHash = await bcrypt.hash(process.env.SEED_PASSWORD || 'password123', 10);
   const users = [
     { displayName: 'Aarav Sharma', email: 'aarav@example.com', phone: '+919876543210', role: UserRole.USER },
     { displayName: 'Priya Iyer', email: 'priya@example.com', phone: '+919812345678', role: UserRole.USER },
@@ -243,7 +244,7 @@ async function seed() {
   await seedCategories();
   const userIds = await seedUsers();
   await seedListings(userIds);
-  console.log('✅ Seed complete. Demo logins (password "password123"): aarav@example.com, priya@example.com, admin@becho.in');
+  console.log(`✅ Seed complete. Demo logins (password ${process.env.SEED_PASSWORD ? 'from SEED_PASSWORD' : '"password123"'}): aarav@example.com, priya@example.com, admin@becho.in`);
 }
 
 seed()

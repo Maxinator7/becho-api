@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '@prisma/client';
 import { prisma } from '../../common/prisma.js';
-import { env, isProduction } from '../../config/env.js';
+import { env, exposeDevOtp } from '../../config/env.js';
 import { ApiError } from '../../common/errors/api-error.js';
 import { RegisterInput, LoginInput, VerifyOtpInput } from './auth.schema.js';
 import { UserRole, UserStatus, VerificationChannel } from '../../common/types/enums.js';
@@ -65,8 +65,8 @@ export class AuthService {
   private static verificationResponse(channel: VerificationChannel, code: string) {
     return {
       verificationMessage: `Verification code sent via ${channel}.`,
-      // Only exposed outside production until a real SMS/email provider is wired up.
-      ...(isProduction ? {} : { devOtp: code }),
+      // Exposed outside production, or on staging via EXPOSE_DEV_OTP, until a real SMS provider is wired up.
+      ...(exposeDevOtp ? { devOtp: code } : {}),
     };
   }
 

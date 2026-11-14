@@ -64,3 +64,7 @@ Demo logins (password `password123`): `aarav@example.com`, `priya@example.com`, 
 - **Responses:** `{ success: true, data }` or `{ success: false, error: { code, message, details? } }`.
 - **Production:** `JWT_SECRET` / `JWT_REFRESH_SECRET` must be strong (32+ chars) or the server refuses to start.
   Browser access is limited to `CORS_ORIGINS`.
+
+## Deploying
+
+Staging runs on Render (free) + Neon. See [DEPLOY.md](DEPLOY.md) and `render.yaml`.

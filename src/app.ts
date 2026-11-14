@@ -15,9 +15,13 @@ import { favoritesRouter } from './modules/favorites/favorites.routes.js';
 import { offersRouter } from './modules/offers/offers.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 import { ApiError } from './common/errors/api-error.js';
+import { apiRateLimit, authRateLimit } from './common/middleware/rate-limit.js';
 
 export function createApp() {
   const app = express();
+  // Behind one reverse proxy on Render/most PaaS: trust it so req.ip is the real client IP.
+  app.set('trust proxy', 1);
+  app.disable('x-powered-by');
 
   // Only allow configured browser origins. Requests without an Origin header
   // (mobile apps, curl, server-to-server) are not affected by CORS.
@@ -34,7 +38,8 @@ export function createApp() {
 
   // API v1 Routes
   app.use('/api/v1', healthRouter);
-  app.use('/api/v1/auth', authRouter);
+  app.use('/api/v1', apiRateLimit);
+  app.use('/api/v1/auth', authRateLimit, authRouter);
   app.use('/api/v1/users', usersRouter);
   app.use('/api/v1/locations', locationsRouter);
   app.use('/api/v1/categories', categoriesRouter);
