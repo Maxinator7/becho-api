@@ -53,6 +53,21 @@ const envSchema = z
       for (const key of ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET', 'R2_PUBLIC_URL'] as const) {
         if (!cfg[key]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required when STORAGE_DRIVER=r2` });
       }
+      // Catch copy-paste mistakes at startup instead of failing on the first upload.
+      const shape: [keyof typeof cfg, RegExp, string][] = [
+        ['R2_ACCOUNT_ID', /^[0-9a-f]{32}$/, '32 hex characters (from the dashboard URL)'],
+        ['R2_ACCESS_KEY_ID', /^[0-9a-f]{32}$/, '32 hex characters'],
+        ['R2_SECRET_ACCESS_KEY', /^[0-9a-f]{64}$/, '64 hex characters'],
+      ];
+      for (const [key, pattern, expected] of shape) {
+        const value = cfg[key];
+        if (typeof value === 'string' && value && !pattern.test(value)) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} looks wrong: expected ${expected}, got ${value.length} characters` });
+        }
+      }
+      if (cfg.R2_PUBLIC_URL?.includes('r2.cloudflarestorage.com')) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['R2_PUBLIC_URL'], message: 'R2_PUBLIC_URL is the private S3 endpoint; use the bucket\'s public r2.dev URL (or custom domain)' });
+      }
     }
     if (cfg.NODE_ENV !== 'production') return;
     for (const key of ['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const) {

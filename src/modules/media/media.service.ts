@@ -119,7 +119,10 @@ export class MediaService {
       const reusable = upload.status === UploadStatus.PENDING || (listingId !== undefined && upload.listingId === listingId);
       if (!reusable) throw ApiError.badRequest('One of the files is already used by another listing', 'UPLOAD_ALREADY_USED');
 
-      const stored = await storage.head(upload.storageKey);
+      const stored = await storage.head(upload.storageKey).catch((err) => {
+        console.error('[media] storage check failed:', err instanceof Error ? err.message : err);
+        throw new ApiError(502, 'STORAGE_UNAVAILABLE', 'Photo storage is not reachable right now. Please try again in a minute.');
+      });
       if (!stored) throw ApiError.badRequest('One of the files has not finished uploading', 'UPLOAD_INCOMPLETE');
       if (stored.size > maxBytes(upload.mediaType)) {
         throw ApiError.badRequest('One of the files is larger than allowed', 'MEDIA_TOO_LARGE');
