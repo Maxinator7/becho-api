@@ -318,6 +318,11 @@ describe('negotiation shows up in chat and notifications', () => {
     expect(msgNotes[0].data.count).toBe(3);
     const unread = await request(app).get(`${api}/notifications/unread-count`).set(auth(seller.token));
     expect(unread.body.data.unreadCount).toBe(1);
+
+    // Opening the chat clears that notification.
+    await request(app).patch(`${api}/conversations/${conv.body.data.id}/read`).set(auth(seller.token)).expect(200);
+    const after = await request(app).get(`${api}/notifications/unread-count`).set(auth(seller.token));
+    expect(after.body.data.unreadCount).toBe(0);
   });
 });
 

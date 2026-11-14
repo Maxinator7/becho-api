@@ -70,6 +70,16 @@ The API refuses to start if `STORAGE_DRIVER=r2` and any R2 value is missing, so 
 
 **Limits** (env vars on Render, defaults in brackets): photo size `MEDIA_MAX_IMAGE_MB` (5), video size `MEDIA_MAX_VIDEO_MB` (50), video length `MEDIA_MAX_VIDEO_SECONDS` (60), photos per listing `MEDIA_MAX_IMAGES_PER_LISTING` (10), videos per listing `MEDIA_MAX_VIDEOS_PER_LISTING` (1), uploads per user per day `MEDIA_UPLOADS_PER_DAY` (100), new listings per user per day `LISTINGS_PER_DAY` (5). Uploads never attached to a listing are deleted after 24 hours.
 
+## 7. Cloudflare: admin portal (separate from the marketplace)
+The admin portal is its own app, built from `becho-web` (`npm run build:admin` → `dist-admin/`) and deployed as a second Worker, so the public site contains no admin code.
+
+1. **Workers & Pages → Create → Import a repository** → `Maxinator7/becho-web` again, branch `main`, Worker name **`becho-admin`**.
+2. Build command: `npm run build:admin`. Deploy command: `npx wrangler deploy --config wrangler.admin.jsonc`.
+3. After the first deploy, copy the URL (`https://becho-admin.<subdomain>.workers.dev`) and **add it to Render's `CORS_ORIGINS`** (comma-separated, after the marketplace URL), plus the R2 CORS list if staff will upload.
+4. **Lock it down with Cloudflare Access (free for up to 50 users):** Worker → **Settings → Domains & Routes** → on the `workers.dev` row choose **Enable Cloudflare Access**. Then in **Zero Trust → Access → Applications** edit the generated policy to allow only your staff emails. Visitors must prove they own an allowed email (one-time code) before the admin page even loads; the API still checks the admin role on every request.
+
+Later, with a custom domain (e.g. `becho.in`): marketplace at `becho.in`, admin at `admin.becho.in`, media at `media.becho.in`.
+
 ## Known limits of this setup
 - **Cold starts:** the API sleeps when idle, and the first request after that takes about a minute. Render Starter ($7/month) removes this.
 - **Background jobs only run while the API is awake.** The in-process scheduler expires listings and offers. Expiry catches up on the next wake-up.

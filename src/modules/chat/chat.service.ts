@@ -1,7 +1,7 @@
 import { prisma } from '../../common/prisma.js';
 import { ApiError } from '../../common/errors/api-error.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
-import { ListingStatus } from '../../common/types/enums.js';
+import { ListingStatus, NotificationType } from '../../common/types/enums.js';
 
 export class ChatService {
   static async getOrCreateConversation(listingId: string, buyerId: string) {
@@ -168,6 +168,16 @@ export class ChatService {
         conversationId,
         senderId: { not: userId },
         isRead: false,
+      },
+      data: { isRead: true },
+    });
+    // Reading the chat also clears its "new message" notification.
+    await prisma.notification.updateMany({
+      where: {
+        userId,
+        isRead: false,
+        type: NotificationType.MESSAGE_RECEIVED,
+        data: { path: ['conversationId'], equals: conversationId },
       },
       data: { isRead: true },
     });
