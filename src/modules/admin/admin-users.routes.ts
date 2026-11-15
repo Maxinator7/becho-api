@@ -47,12 +47,15 @@ adminUsersRouter.get('/', wrap(async (req, res) => {
   if (q.role) where.role = q.role;
   if (q.search) {
     const term = q.search;
+    const digits = term.replace(/\D/g, '');
+    // Only treat the search as a phone number when it is mostly digits (so "BCH-T8EZM9" doesn't match every phone with an 8).
+    const looksLikePhone = digits.length >= 4 && digits.length >= term.replace(/[\s+()-]/g, '').length - 1;
     const phone = normalizeIndianPhone(term);
     where.OR = [
       { displayName: { contains: term, mode: 'insensitive' } },
       { email: { contains: term, mode: 'insensitive' } },
       { userCode: { contains: term.toUpperCase() } },
-      { phone: { contains: phone ?? (term.replace(/\D/g, '') || term) } },
+      ...(looksLikePhone ? [{ phone: { contains: phone ?? digits } }] : []),
     ];
   }
   const orderBy: Prisma.UserOrderByWithRelationInput =
@@ -103,6 +106,13 @@ adminUsersRouter.get('/:id', wrap(async (req, res) => {
     }),
   ]);
 
+  // Name who did each action in the account history.
+  const actorIds = [...new Set(history.map((h) => h.actorId))];
+  const actors = actorIds.length
+    ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, displayName: true, role: true } })
+    : [];
+  const actorById = new Map(actors.map((a) => [a.id, a]));
+
   res.json({
     success: true,
     data: {
@@ -117,7 +127,7 @@ adminUsersRouter.get('/:id', wrap(async (req, res) => {
       },
       recentListings,
       notes,
-      history,
+      history: history.map((h) => ({ ...h, actor: actorById.get(h.actorId) ?? null })),
     },
   });
 }));

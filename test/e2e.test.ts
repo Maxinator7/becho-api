@@ -527,6 +527,9 @@ describe('admin: users', () => {
 
     const note = await request(app).post(`${api}/admin/users/${seller.id}/notes`).set(auth(adminToken)).send({ note: 'Called about duplicate listings' });
     expect(note.status).toBe(201);
+    // A user-code search doesn't also match phones that merely share a digit.
+    const byCode = await request(app).get(`${api}/admin/users`).query({ search: code }).set(auth(adminToken));
+    expect(byCode.body.data.users).toHaveLength(1);
     const detail = await request(app).get(`${api}/admin/users/${seller.id}`).set(auth(adminToken));
     expect(detail.body.data.stats.listingsByStatus.LIVE).toBe(1);
     expect(detail.body.data.notes[0].note).toBe('Called about duplicate listings');
@@ -546,6 +549,8 @@ describe('admin: users', () => {
     const adminUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@test.in' } });
     expect((await request(app).post(`${api}/admin/users/${adminUser.id}/status`).set(auth(adminToken)).send({ status: 'BANNED', reason: 'testing self' })).status).toBe(400);
 
+    const history = await request(app).get(`${api}/admin/users/${seller.id}`).set(auth(adminToken));
+    expect(history.body.data.history[0].actor.displayName).toBe('Admin');
     await request(app).post(`${api}/admin/users/${seller.id}/status`).set(auth(adminToken)).send({ status: 'ACTIVE' }).expect(200);
     expect((await request(app).post(`${api}/auth/login`).send({ identifier: '9833300001', password: 'password123' })).status).toBe(200);
     expect((await request(app).get(`${api}/listings/${listing.id}`)).status).toBe(200);

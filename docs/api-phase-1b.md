@@ -32,7 +32,7 @@ All responses: `{ success: true, data }` or `{ success: false, error: { code, me
 
 ### Users — `/admin/users`
 - `GET /admin/users?search=&status=&role=&sort=newest|oldest|last_login|name&page=&limit=` → `{ users, pagination }`. Search matches name, email, mobile (any format) or user code. User: `{ id, userCode, displayName, email, phone, status, role, emailVerifiedAt, phoneVerifiedAt, lockedUntil, lastLoginAt, createdAt, _count: { listings, buyerOffers } }`.
-- `GET /admin/users/:id` → `{ user (+failedLoginCount, statusReason), stats: { listingsByStatus, offersMade, offersReceived, dealsAsBuyer, dealsAsSeller, messagesSent }, recentListings[], notes[{ id, note, createdAt, author }], history[{ action, actorId, details, createdAt }] }`.
+- `GET /admin/users/:id` → `{ user (+failedLoginCount, statusReason), stats: { listingsByStatus, offersMade, offersReceived, dealsAsBuyer, dealsAsSeller, messagesSent }, recentListings[], notes[{ id, note, createdAt, author }], history[{ action, actorId, actor{ displayName, role }|null, details, createdAt }] }`.
 - `POST /admin/users/:id/status { status: 'ACTIVE'|'SUSPENDED'|'BANNED', reason }` — **ADMIN only**; reason required (≥5 chars) unless ACTIVE. Can't target self or staff. Blocking signs the user out, cancels their pending offers and hides their listings.
 - `POST /admin/users/:id/notes { note }` → created note (internal only).
 - `POST /admin/users/:id/unlock` → clears a login lock.
