@@ -85,6 +85,41 @@ The admin portal is its own app, built from `becho-web` (`npm run build:admin` �
 
 Later, with a custom domain (e.g. `becho.in`): marketplace at `becho.in`, admin at `admin.becho.in`, media at `media.becho.in`.
 
+## 8. Brevo: email codes (verification + password reset)
+Render's free plan blocks SMTP, so the API sends email through Brevo's HTTPS API (free: 300 emails/day).
+
+1. Sign up at **brevo.com** (free plan).
+2. **Senders, Domains & Dedicated IPs → Senders → Add a sender**: name `Becho`, email = an address you own (e.g. your Gmail). Click the confirmation link Brevo emails you.
+3. **SMTP & API → API Keys → Generate a new API key** (name `becho-api`). Copy it (shown once).
+4. Render → becho-api → Environment:
+   - `BREVO_API_KEY` = the key
+   - `EMAIL_FROM` = the sender address you verified in step 2
+   - `EMAIL_FROM_NAME` = `Becho`
+5. Once a test sign-up receives its email, set `EXPOSE_DEV_OTP=false` so codes are no longer shown on screen.
+
+Without a custom domain, some emails may land in spam (Gmail sender sent via Brevo). When you buy a domain (e.g. `becho.in`), authenticate it in Brevo (DKIM/DMARC records) and switch `EMAIL_FROM` to `no-reply@becho.in`.
+
+## 9. PostHog: product analytics, campaigns, session replay, errors
+Free: 1M events/month, 5k session replays, error tracking. One project covers API, web and mobile.
+
+1. Sign up at **posthog.com** → create a project (choose **US** or **EU** cloud; note which).
+2. **Project settings → Project API key** (starts with `phc_`, safe to expose in the web app). Host is `https://us.i.posthog.com` or `https://eu.i.posthog.com`.
+3. API (server events: sign-ups, listings, offers, deals, sales) — Render env: `POSTHOG_KEY`, `POSTHOG_HOST`.
+4. Web + admin (page views, UTM campaign tracking, session replay with inputs masked) — add to `becho-web/.env.production`: `VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST`, then push.
+5. Campaigns: share links like `https://<site>/?utm_source=instagram&utm_medium=social&utm_campaign=diwali_sale`; PostHog attributes sign-ups and listings to them (Web analytics → Channels / UTM breakdowns).
+
+No personal data (email, phone) is sent to PostHog — users are identified by internal id and user code only.
+
+## 10. UptimeRobot: uptime alerts
+Free: 50 monitors, checked every 5 minutes.
+
+1. Sign up at **uptimerobot.com** → **New monitor** → type **HTTP(s)**:
+   - URL: `https://becho-api.onrender.com/api/v1/health`, interval 5 minutes, alert contact = your email.
+2. Add a second monitor for the website: `https://becho-web.gautamwarmachine68.workers.dev`.
+3. Optional: **Status pages → New** to get a public status page.
+
+Side effect: pinging the API every 5 minutes keeps Render's free instance from sleeping (no ~1-minute cold starts). One always-on service uses ~744 of Render's 750 free hours a month, so don't add a second free Render service. The health endpoint doesn't touch the database, so Neon still scales to zero when idle.
+
 ## Known limits of this setup
 - **Cold starts:** the API sleeps when idle, and the first request after that takes about a minute. Render Starter ($7/month) removes this.
 - **Background jobs only run while the API is awake.** The in-process scheduler expires listings and offers. Expiry catches up on the next wake-up.
