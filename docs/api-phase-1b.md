@@ -38,12 +38,12 @@ All responses: `{ success: true, data }` or `{ success: false, error: { code, me
 - `POST /admin/users/:id/unlock` → clears a login lock.
 
 ### Listings — `/admin/listings`
-- `GET /admin/listings?status=&search=&cityCode=&categoryId=&sellerId=&verified=true|false&sort=newest|oldest|price_desc|price_asc&page=&limit=` → `{ listings, pagination }`. Item: `{ id, title, price, status, condition, cityCode, stateCode, verifiedAt, createdAt, publishedAt, submittedAt, seller{ id, userCode, displayName, status }, category{ id, name }, media[0..1]{ url, mediaType }, sanitization{ status, score }, reviews[0..1]{ action, remark, createdAt }, _count{ offers, conversations, media } }`. Search matches title, description, seller name or user code.
+- `GET /admin/listings?status=&search=&cityCode=&categoryId=&sellerId=&verified=true|false&sort=newest|oldest|price_desc|price_asc&page=&limit=` → `{ listings, pagination }`. Item: `{ id, title, price, status, condition, cityCode, stateCode, verifiedAt, createdAt, publishedAt, submittedAt, seller{ id, userCode, displayName, status, emailVerifiedAt, phoneVerifiedAt, createdAt }, category{ id, name }, media[0..1]{ url, mediaType }, sanitization{ status, score }, reviews[0..1]{ action, remark, createdAt }, _count{ offers, conversations, media } }`. Search matches title, description, seller name or user code.
 - `GET /admin/listings/:id` → full listing incl. `seller{…email, phone}`, `category{ name, parent{ name } }`, `attributes`, `media[]`, `sanitization{ status, score, reasons, checks }`, `reviews[]{ action, remark, visibleToSeller, createdAt, reviewer{ displayName } }`, `_count{ offers, conversations, favorites }`, `offerStats{ PENDING: n, … }`.
 - `POST /admin/listings/:id/verify { remark? }` (LIVE/RESERVED) · `POST /admin/listings/:id/unverify { remark? }`
 - `POST /admin/listings/:id/request-changes { remark }` (LIVE, PENDING_REVIEW, SUBMITTED; remark ≥5 chars) → status CHANGES_REQUESTED, pending offers cancelled, seller notified.
 - `POST /admin/listings/:id/remarks { remark, visibleToSeller = true }`
-- Existing: `GET /admin/moderation/queue`, `POST /admin/moderation/listings/:id/approve { note? } | reject { reason? } | suspend { reason? }` (now also recorded in reviews).
+- Existing: `GET /admin/moderation/queue` (seller now includes `userCode, status, emailVerifiedAt, phoneVerifiedAt, createdAt`), `POST /admin/moderation/listings/:id/approve { note? } | reject { reason? } | suspend { reason? }` (now also recorded in reviews).
 
 ### Analytics — `GET /admin/analytics?days=7..365` (default 30)
 ```

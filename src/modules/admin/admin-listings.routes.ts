@@ -53,7 +53,7 @@ adminListingsRouter.get('/', wrap(async (req, res) => {
       select: {
         id: true, title: true, price: true, status: true, condition: true, cityCode: true, stateCode: true,
         verifiedAt: true, createdAt: true, publishedAt: true, submittedAt: true,
-        seller: { select: { id: true, userCode: true, displayName: true, status: true } },
+        seller: { select: { id: true, userCode: true, displayName: true, status: true, emailVerifiedAt: true, phoneVerifiedAt: true, createdAt: true } },
         category: { select: { id: true, name: true } },
         media: { take: 1, orderBy: { sortOrder: 'asc' }, select: { url: true, mediaType: true } },
         sanitization: { select: { status: true, score: true } },

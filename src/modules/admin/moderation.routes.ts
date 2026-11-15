@@ -35,7 +35,7 @@ moderationRouter.get('/queue', wrap(async (_req, res) => {
   const queue = await prisma.listing.findMany({
     where: { status: { in: REVIEWABLE } },
     include: {
-      seller: { select: { id: true, displayName: true, email: true, phone: true } },
+      seller: { select: { id: true, userCode: true, displayName: true, email: true, phone: true, status: true, emailVerifiedAt: true, phoneVerifiedAt: true, createdAt: true } },
       category: { select: { name: true } },
       sanitization: true,
       media: { orderBy: { sortOrder: 'asc' } },
