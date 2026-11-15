@@ -63,6 +63,7 @@ moderationRouter.post('/listings/:id/approve', wrap(async (req, res) => {
       where: { listingId },
       data: { status: SanitizationStatus.PASSED, reviewedBy: actorId, reviewedAt: now },
     }),
+    prisma.listingReview.create({ data: { listingId, reviewerId: actorId, action: 'APPROVED', remark: note || null } }),
     prisma.auditLog.create({
       data: { actorId, action: 'LISTING_APPROVED', targetType: 'LISTING', targetId: listingId, details: { note: note || 'Manually approved by moderator' } },
     }),
@@ -80,6 +81,7 @@ moderationRouter.post('/listings/:id/reject', wrap(async (req, res) => {
   const listing = await transition(listingId, REVIEWABLE, { status: ListingStatus.REJECTED });
   await prisma.$transaction([
     prisma.listingSanitization.updateMany({ where: { listingId }, data: { reviewedBy: actorId, reviewedAt: new Date() } }),
+    prisma.listingReview.create({ data: { listingId, reviewerId: actorId, action: 'REJECTED', remark: reason || 'Violates community guidelines' } }),
     prisma.auditLog.create({
       data: { actorId, action: 'LISTING_REJECTED', targetType: 'LISTING', targetId: listingId, details: { reason: reason || 'Violates community guidelines' } },
     }),
@@ -97,6 +99,7 @@ moderationRouter.post('/listings/:id/suspend', wrap(async (req, res) => {
   const listing = await transition(listingId, SUSPENDABLE, { status: ListingStatus.SUSPENDED });
   await prisma.$transaction([
     prisma.offer.updateMany({ where: { listingId, status: OfferStatus.PENDING }, data: { status: OfferStatus.CANCELLED } }),
+    prisma.listingReview.create({ data: { listingId, reviewerId: actorId, action: 'SUSPENDED', remark: reason || 'Suspended by admin' } }),
     prisma.auditLog.create({
       data: { actorId, action: 'LISTING_SUSPENDED', targetType: 'LISTING', targetId: listingId, details: { reason: reason || 'Suspended by admin' } },
     }),

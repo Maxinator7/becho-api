@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from './common/prisma.js';
+import { uniqueUserCode } from './common/user-code.js';
 import { AttributeDataType, ListingStatus, UserRole, UserStatus } from './common/types/enums.js';
 
 /**
@@ -142,7 +143,7 @@ async function seedUsers() {
     const user = await prisma.user.upsert({
       where: { email: u.email },
       update: {},
-      create: { ...u, passwordHash, status: UserStatus.ACTIVE, phoneVerifiedAt: u.phone ? new Date() : null, emailVerifiedAt: new Date() },
+      create: { ...u, userCode: await uniqueUserCode(), passwordHash, status: UserStatus.ACTIVE, phoneVerifiedAt: u.phone ? new Date() : null, emailVerifiedAt: new Date() },
     });
     result[u.email] = user.id;
   }

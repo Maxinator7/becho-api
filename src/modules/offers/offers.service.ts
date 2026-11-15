@@ -4,6 +4,7 @@ import { ApiError } from '../../common/errors/api-error.js';
 import { ListingStatus, OfferStatus } from '../../common/types/enums.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { ConversationEvent, postConversationEvent } from '../chat/conversation-events.js';
+import { track } from '../../common/analytics.js';
 
 const OFFER_EXPIRY_HOURS = 48;
 const offerExpiry = () => new Date(Date.now() + OFFER_EXPIRY_HOURS * 60 * 60 * 1000);
@@ -91,6 +92,7 @@ export class OffersService {
       return created;
     });
 
+    track(buyerId, 'offer_made', { listingId: offer.listingId, amount: offer.amount, askingPrice: offer.listing.price });
     NotificationsService.notifyOfferCreated(
       offer.sellerId, offer.buyer.displayName, offer.amount, offer.listing.title, offer.id, offer.listingId
     ).catch(() => {});
@@ -200,6 +202,7 @@ export class OffersService {
     });
 
     const actorName = actorId === accepted.sellerId ? accepted.seller.displayName : accepted.buyer.displayName;
+    track(actorId, 'deal_agreed', { listingId: accepted.listingId, amount: accepted.amount, askingPrice: accepted.listing.price });
     NotificationsService.notifyOfferAccepted(
       accepted.proposedById, actorName, accepted.amount, accepted.listing.title, accepted.id, accepted.listingId
     ).catch(() => {});

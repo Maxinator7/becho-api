@@ -2,13 +2,14 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../common/prisma.js';
 import { ApiError } from '../../common/errors/api-error.js';
 import { AuthenticatedUser } from '../../common/middleware/auth-guard.js';
-import { ListingStatus, OfferStatus, SanitizationStatus, UserRole } from '../../common/types/enums.js';
+import { ListingStatus, OfferStatus, SanitizationStatus, UserRole, UserStatus } from '../../common/types/enums.js';
 import { SanitizationEngine } from '../sanitization/sanitization.engine.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { ConversationEvent, postConversationEvent } from '../chat/conversation-events.js';
 import { CreateListingInput, ListingQuery, UpdateListingInput } from './listings.schema.js';
 import { MediaService } from '../media/media.service.js';
 import { env } from '../../config/env.js';
+import { track } from '../../common/analytics.js';
 
 export const LISTING_TTL_DAYS = 30;
 const LISTING_TTL_MS = LISTING_TTL_DAYS * 24 * 60 * 60 * 1000;
@@ -16,11 +17,11 @@ const LISTING_TTL_MS = LISTING_TTL_DAYS * 24 * 60 * 60 * 1000;
 /** Statuses anyone may view. Everything else is visible only to the owner and moderators. */
 const PUBLIC_STATUSES: string[] = [ListingStatus.LIVE, ListingStatus.RESERVED, ListingStatus.SOLD];
 /** Statuses a seller may edit and (re)submit. */
-const EDITABLE_STATUSES: string[] = [ListingStatus.DRAFT, ListingStatus.REJECTED];
-const DELETABLE_STATUSES: string[] = [ListingStatus.DRAFT, ListingStatus.EXPIRED, ListingStatus.REJECTED, ListingStatus.SOLD];
+const EDITABLE_STATUSES: string[] = [ListingStatus.DRAFT, ListingStatus.REJECTED, ListingStatus.CHANGES_REQUESTED];
+const DELETABLE_STATUSES: string[] = [ListingStatus.DRAFT, ListingStatus.EXPIRED, ListingStatus.REJECTED, ListingStatus.CHANGES_REQUESTED, ListingStatus.SOLD];
 
 const listingDetailInclude = {
-  seller: { select: { id: true, displayName: true, status: true, createdAt: true } },
+  seller: { select: { id: true, userCode: true, displayName: true, status: true, createdAt: true } },
   category: { select: { id: true, name: true, slug: true, parentId: true } },
   attributes: {
     include: { attributeDefinition: { select: { id: true, name: true, slug: true, dataType: true } } },
@@ -162,6 +163,7 @@ export class ListingsService {
       await MediaService.markAttached(tx, media.uploadIds, created.id);
       return created;
     });
+    track(sellerId, 'listing_created', { listingId: listing.id, categoryId: input.categoryId, cityCode: input.cityCode, price: input.price, photos: media.rows.filter((r) => r.mediaType === 'IMAGE').length, videos: media.rows.filter((r) => r.mediaType === 'VIDEO').length });
 
     return this.getListingById(listing.id);
   }
@@ -185,7 +187,9 @@ export class ListingsService {
       true
     );
 
-    return this.runChecksAndPublish(listing);
+    const result = await this.runChecksAndPublish(listing);
+    track(sellerId, 'listing_submitted', { listingId, outcome: result.status });
+    return result;
   }
 
   static async updateListingDraft(listingId: string, sellerId: string, input: UpdateListingInput) {
@@ -258,6 +262,7 @@ export class ListingsService {
       }
       return accepted;
     }).then((accepted) => {
+      track(sellerId, 'listing_sold', { listingId, viaOffer: !!accepted, amount: accepted?.amount ?? null });
       if (accepted) {
         NotificationsService.notifyReservationEnded(accepted.buyerId, accepted.seller.displayName, listing.title, listingId, 'SOLD').catch(() => {});
       }
@@ -329,14 +334,17 @@ export class ListingsService {
     const listing = await this.getListingById(id);
     const isOwner = viewer?.userId === listing.sellerId;
     const isStaff = viewer?.role === UserRole.ADMIN || viewer?.role === UserRole.MODERATOR;
-    if (!PUBLIC_STATUSES.includes(listing.status) && !isOwner && !isStaff) {
+    // Listings of suspended/banned sellers disappear from the marketplace too.
+    const sellerActive = listing.seller.status === UserStatus.ACTIVE;
+    if ((!PUBLIC_STATUSES.includes(listing.status) || !sellerActive) && !isOwner && !isStaff) {
       throw ApiError.notFound('Listing not found', 'LISTING_NOT_FOUND');
     }
     return listing;
   }
 
   static async getPublicListings(query: ListingQuery) {
-    const where: Prisma.ListingWhereInput = { status: ListingStatus.LIVE };
+    const where: Prisma.ListingWhereInput = { status: ListingStatus.LIVE, seller: { status: UserStatus.ACTIVE } };
+    if (query.verified) where.verifiedAt = { not: null };
 
     if (query.categoryId) {
       // A top-level category also matches listings in its subcategories.
@@ -391,8 +399,25 @@ export class ListingsService {
         category: { select: { name: true } },
         media: { orderBy: { sortOrder: 'asc' }, take: 1 },
         sanitization: { select: { status: true, reasons: true } },
+        // Latest staff remark the seller is allowed to see (e.g. why changes were requested).
+        reviews: {
+          where: { visibleToSeller: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { action: true, remark: true, createdAt: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /** Staff remarks visible to the seller, newest first. */
+  static async getSellerReviews(listingId: string, sellerId: string) {
+    await this.getOwnedListing(listingId, sellerId);
+    return prisma.listingReview.findMany({
+      where: { listingId, visibleToSeller: true },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, action: true, remark: true, createdAt: true },
     });
   }
 

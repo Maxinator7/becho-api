@@ -24,6 +24,11 @@ listingsRouter.get('/:id', optionalAuth, wrap(async (req, res) => {
   res.json({ success: true, data: await ListingsService.getListingForViewer(id.parse(req.params.id), req.user) });
 }));
 
+// Seller: staff remarks on my listing (e.g. requested changes)
+listingsRouter.get('/:id/reviews', authenticateToken, wrap(async (req, res) => {
+  res.json({ success: true, data: await ListingsService.getSellerReviews(id.parse(req.params.id), req.user!.userId) });
+}));
+
 // Seller: create draft (verified accounts only)
 listingsRouter.post('/', authenticateToken, requireActiveStatus, wrap(async (req, res) => {
   const listing = await ListingsService.createListingDraft(req.user!.userId, createListingSchema.parse(req.body));

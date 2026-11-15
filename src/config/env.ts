@@ -47,6 +47,15 @@ const envSchema = z
     MEDIA_MAX_VIDEOS_PER_LISTING: num('1'),
     MEDIA_UPLOADS_PER_DAY: num('100'),
     LISTINGS_PER_DAY: num('5'),
+
+    // Transactional email (OTP, password reset) via Brevo's HTTPS API. Unset = log emails to the console.
+    BREVO_API_KEY: z.string().optional(),
+    EMAIL_FROM: z.string().email().default('no-reply@becho.local'),
+    EMAIL_FROM_NAME: z.string().default('Becho'),
+
+    // Product analytics (server-side events). Unset = disabled.
+    POSTHOG_KEY: z.string().optional(),
+    POSTHOG_HOST: z.string().url().default('https://us.i.posthog.com'),
   })
   .superRefine((cfg, ctx) => {
     if (cfg.STORAGE_DRIVER === 'r2') {
@@ -68,6 +77,9 @@ const envSchema = z
       if (cfg.R2_PUBLIC_URL?.includes('r2.cloudflarestorage.com')) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['R2_PUBLIC_URL'], message: 'R2_PUBLIC_URL is the private S3 endpoint; use the bucket\'s public r2.dev URL (or custom domain)' });
       }
+    }
+    if (cfg.BREVO_API_KEY && cfg.EMAIL_FROM.endsWith('.local')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['EMAIL_FROM'], message: 'EMAIL_FROM must be the sender address you verified in Brevo' });
     }
     if (cfg.NODE_ENV !== 'production') return;
     for (const key of ['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const) {

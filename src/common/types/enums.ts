@@ -27,6 +27,8 @@ export const ListingStatus = {
   LIVE: 'LIVE',
   RESERVED: 'RESERVED',
   REJECTED: 'REJECTED',
+  /** Staff sent it back to the seller with remarks; hidden until edited and resubmitted. */
+  CHANGES_REQUESTED: 'CHANGES_REQUESTED',
   SUSPENDED: 'SUSPENDED',
   SOLD: 'SOLD',
   EXPIRED: 'EXPIRED',
@@ -97,6 +99,9 @@ export const NotificationType = {
   OFFER_COUNTERED: 'OFFER_COUNTERED',
   LISTING_SOLD: 'LISTING_SOLD',
   RESERVATION_RELEASED: 'RESERVATION_RELEASED',
+  LISTING_CHANGES_REQUESTED: 'LISTING_CHANGES_REQUESTED',
+  LISTING_VERIFIED: 'LISTING_VERIFIED',
+  LISTING_REMARK: 'LISTING_REMARK',
 } as const;
 export type NotificationType = typeof NotificationType[keyof typeof NotificationType];
 

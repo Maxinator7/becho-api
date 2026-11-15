@@ -16,17 +16,25 @@ model HealthCheck {
 }
 
 model User {
-  id              String    @id @default(uuid())
-  displayName     String    @map("display_name")
-  email           String?   @unique
-  phone           String?   @unique
-  passwordHash    String    @map("password_hash")
-  status          String    @default("PENDING_VERIFICATION")
-  role            String    @default("USER")
-  emailVerifiedAt DateTime? @map("email_verified_at")
-  phoneVerifiedAt DateTime? @map("phone_verified_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  displayName      String    @map("display_name")
+  /// Short public identifier shown to users and support, e.g. BCH-7K3M9Q.
+  userCode         String    @unique @map("user_code")
+  /// Required for new accounts; nullable only for accounts created before Phase 1b.
+  email            String?   @unique
+  phone            String?   @unique
+  passwordHash     String    @map("password_hash")
+  status           String    @default("PENDING_VERIFICATION")
+  role             String    @default("USER")
+  emailVerifiedAt  DateTime? @map("email_verified_at")
+  phoneVerifiedAt  DateTime? @map("phone_verified_at")
+  /// Brute-force protection: consecutive failed logins and temporary lock.
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until")
+  lastLoginAt      DateTime? @map("last_login_at")
+  statusReason     String?   @map("status_reason")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   verifications       UserVerification[]
   refreshTokens       RefreshToken[]
@@ -41,6 +49,9 @@ model User {
   proposedOffers      Offer[]            @relation("ProposedOffers")
   notifications       Notification[]
   mediaUploads        MediaUpload[]
+  listingReviews      ListingReview[]    @relation("ListingReviews")
+  notesAboutMe        UserNote[]         @relation("NotesAboutUser")
+  notesWritten        UserNote[]         @relation("NotesWritten")
 
   @@map("users")
 }
@@ -61,6 +72,9 @@ model Listing {
   metadata           Json?
   locationVisibility String    @default("APPROXIMATE") @map("location_visibility")
   status             String    @default("DRAFT")
+  /// Set when staff have checked the listing; shown to buyers as a "Verified" badge.
+  verifiedAt         DateTime? @map("verified_at")
+  verifiedById       String?   @map("verified_by_id")
   submittedAt        DateTime? @map("submitted_at")
   approvedAt         DateTime? @map("approved_at")
   publishedAt        DateTime? @map("published_at")
@@ -78,6 +92,7 @@ model Listing {
   conversations Conversation[]
   favorites     Favorite[]
   offers        Offer[]
+  reviews       ListingReview[]
 
   @@index([status, countryCode, cityCode])
   @@index([categoryId])
@@ -194,6 +209,8 @@ model UserVerification {
   id        String    @id @default(uuid())
   userId    String    @map("user_id")
   channel   String
+  /// VERIFY (account verification) or PASSWORD_RESET
+  purpose   String    @default("VERIFY")
   code      String
   attempts  Int       @default(0)
   expiresAt DateTime  @map("expires_at")
@@ -203,6 +220,7 @@ model UserVerification {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, channel])
+  @@index([userId, purpose])
   @@map("user_verifications")
 }
 
@@ -402,4 +420,37 @@ model MediaUpload {
   @@index([userId, createdAt])
   @@index([status, createdAt])
   @@map("media_uploads")
+}
+
+/// Staff review history on a listing: verify, request changes, remarks, approve/reject/suspend.
+model ListingReview {
+  id              String   @id @default(uuid())
+  listingId       String   @map("listing_id")
+  reviewerId      String   @map("reviewer_id")
+  action          String
+  remark          String?
+  /// Remarks the seller can see (false = internal staff note).
+  visibleToSeller Boolean  @default(true) @map("visible_to_seller")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  listing  Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  reviewer User    @relation("ListingReviews", fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, createdAt])
+  @@map("listing_reviews")
+}
+
+/// Internal staff notes about a user (never shown to the user).
+model UserNote {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  authorId  String   @map("author_id")
+  note      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User @relation("NotesAboutUser", fields: [userId], references: [id], onDelete: Cascade)
+  author User @relation("NotesWritten", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("user_notes")
 }

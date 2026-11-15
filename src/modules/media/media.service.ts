@@ -46,7 +46,7 @@ export interface CreateUploadInput {
 }
 
 /** A media reference in a listing create/update request. */
-export type ListingMediaInput = { uploadId: string } | { url: string; mimeType?: string; storageKey?: string };
+export type ListingMediaInput = { uploadId: string } | { mediaId: string } | { url: string; mimeType?: string; storageKey?: string };
 
 export interface ListingMediaRow {
   mediaType: string;
@@ -107,8 +107,24 @@ export class MediaService {
       : [];
     const byId = new Map(uploads.map((u) => [u.id, u]));
 
+    // Files already on this listing that the seller keeps while editing.
+    const keepIds = items.flatMap((m) => ('mediaId' in m ? [m.mediaId] : []));
+    const kept = keepIds.length && listingId
+      ? await prisma.listingMedia.findMany({ where: { id: { in: keepIds }, listingId } })
+      : [];
+    const keptById = new Map(kept.map((m) => [m.id, m]));
+    const keptUploads = kept.length
+      ? await prisma.mediaUpload.findMany({ where: { listingId, storageKey: { in: kept.map((m) => m.storageKey) } }, select: { id: true } })
+      : [];
+
     const rows: ListingMediaRow[] = [];
     for (const [i, item] of items.entries()) {
+      if ('mediaId' in item) {
+        const existing = keptById.get(item.mediaId);
+        if (!existing) throw ApiError.badRequest('One of the existing photos was not found on this listing', 'MEDIA_NOT_FOUND');
+        rows.push({ mediaType: existing.mediaType, storageKey: existing.storageKey, url: existing.url, mimeType: existing.mimeType, fileSize: existing.fileSize, sortOrder: i + 1 });
+        continue;
+      }
       if (!('uploadId' in item)) {
         // Legacy/external image link (older mobile builds). Images only.
         rows.push({ mediaType: MediaType.IMAGE, storageKey: item.storageKey || item.url, url: item.url, mimeType: item.mimeType || 'image/jpeg', fileSize: 0, sortOrder: i + 1 });
@@ -145,7 +161,8 @@ export class MediaService {
     if (videos > env.MEDIA_MAX_VIDEOS_PER_LISTING) {
       throw ApiError.badRequest(`A listing can have at most ${env.MEDIA_MAX_VIDEOS_PER_LISTING} video(s)`, 'TOO_MANY_VIDEOS');
     }
-    return { rows, uploadIds };
+    // Kept files' uploads stay attached (so they're not deleted as "removed").
+    return { rows, uploadIds: [...uploadIds, ...keptUploads.map((u) => u.id)] };
   }
 
   /** Marks uploads as used by a listing (inside the listing's transaction). */

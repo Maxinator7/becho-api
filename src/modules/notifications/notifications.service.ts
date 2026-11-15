@@ -277,4 +277,21 @@ export class NotificationsService {
       { listingId }
     );
   }
+
+  /** Staff feedback on a listing: verified badge, requested changes, or a remark. */
+  static async notifyListingReview(
+    sellerId: string,
+    listingTitle: string,
+    listingId: string,
+    kind: 'VERIFIED' | 'CHANGES_REQUESTED' | 'REMARK',
+    remark?: string | null
+  ) {
+    const copy = {
+      VERIFIED: [NotificationType.LISTING_VERIFIED, 'Listing verified ✓', `"${listingTitle}" now shows a Verified badge to buyers.`],
+      CHANGES_REQUESTED: [NotificationType.LISTING_CHANGES_REQUESTED, 'Changes requested', `Please update "${listingTitle}": ${remark ?? 'see the remarks in My Listings.'}`],
+      REMARK: [NotificationType.LISTING_REMARK, 'Note from the Becho team', `About "${listingTitle}": ${remark ?? ''}`],
+    } as const;
+    const [type, title, body] = copy[kind];
+    return this.createNotification(sellerId, type, title, body, { listingId, remark: remark ?? null });
+  }
 }

@@ -14,6 +14,8 @@ const attributeValue = z.object({
 const mediaItem = z.union([
   // Uploaded via POST /media/uploads (photos and videos).
   z.object({ uploadId: id }),
+  // Keep a file already on this listing (when editing).
+  z.object({ mediaId: id }),
   // Legacy: external image link (older mobile builds).
   z.object({
     url: z.string().url('Image URL must be a valid http(s) URL').regex(/^https?:\/\//, 'Image URL must be http(s)'),
@@ -59,6 +61,8 @@ export const listingQuerySchema = z.object({
   maxPrice: z.coerce.number().nonnegative().optional(),
   condition: z.nativeEnum(ListingCondition).optional(),
   search: z.string().trim().max(100).optional(),
+  /** Only listings staff have verified. */
+  verified: z.enum(['true', 'false']).optional().transform((v) => v === 'true'),
   sort: z.enum(['newest', 'oldest', 'price_asc', 'price_desc']).default('newest'),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(12),
