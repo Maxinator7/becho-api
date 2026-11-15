@@ -564,6 +564,8 @@ describe('admin: listing review', () => {
     await request(app).post(`${api}/admin/listings/${listing.id}/verify`).set(auth(adminToken)).send({}).expect(200);
     const pub = await request(app).get(`${api}/listings/${listing.id}`);
     expect(pub.body.data.verifiedAt).toBeTruthy();
+    const fromSeller = await request(app).get(`${api}/listings`).query({ sellerId: seller.id, excludeId: listing.id });
+    expect(fromSeller.body.data.listings.every((l: { id: string; sellerId: string }) => l.sellerId === seller.id && l.id !== listing.id)).toBe(true);
     const verifiedOnly = await request(app).get(`${api}/listings`).query({ verified: 'true' });
     expect(verifiedOnly.body.data.listings.map((l: { id: string }) => l.id)).toContain(listing.id);
     await new Promise((r) => setTimeout(r, 100));

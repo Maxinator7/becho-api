@@ -21,7 +21,7 @@ All responses: `{ success: true, data }` or `{ success: false, error: { code, me
 ## Listings (seller / public)
 
 - New status **`CHANGES_REQUESTED`**: staff sent it back; hidden from public; seller can `PATCH` (edit) and `POST /:id/submit` again. Deletable.
-- `verifiedAt` on listings → show a "Verified" badge. `GET /listings?verified=true` filters to verified ones.
+- `verifiedAt` on listings → show a "Verified" badge. `GET /listings?verified=true` filters to verified ones; `sellerId=` + `excludeId=` give "More from this seller".
 - `GET /listings/mine` items include `reviews: [{ action, remark, createdAt }]` (latest seller-visible staff remark, max 1).
 - `GET /listings/:id/reviews` (owner) → all seller-visible remarks `[{ id, action, remark, createdAt }]`. Actions: `APPROVED, REJECTED, SUSPENDED, VERIFIED, CHANGES_REQUESTED, REMARK`.
 - Editing media: `PATCH /listings/:id { media: [...] }` items can be `{ mediaId }` (keep a file already on the listing — ids from `GET /listings/:id` `media[].id`), `{ uploadId }` (new upload) or `{ url }`. Order = display order; first photo is the cover.

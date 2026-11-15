@@ -54,6 +54,10 @@ export const updateListingSchema = z
 
 export const listingQuerySchema = z.object({
   categoryId: id.optional(),
+  /** Other live listings from one seller ("More from …"). */
+  sellerId: id.optional(),
+  /** Leave one listing out (e.g. the one being viewed). */
+  excludeId: id.optional(),
   cityCode: z.string().toUpperCase().optional(),
   stateCode: z.string().toUpperCase().optional(),
   countryCode: z.string().toUpperCase().optional(),

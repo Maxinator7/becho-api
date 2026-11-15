@@ -345,6 +345,8 @@ export class ListingsService {
   static async getPublicListings(query: ListingQuery) {
     const where: Prisma.ListingWhereInput = { status: ListingStatus.LIVE, seller: { status: UserStatus.ACTIVE } };
     if (query.verified) where.verifiedAt = { not: null };
+    if (query.sellerId) where.sellerId = query.sellerId;
+    if (query.excludeId) where.id = { not: query.excludeId };
 
     if (query.categoryId) {
       // A top-level category also matches listings in its subcategories.
