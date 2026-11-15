@@ -453,8 +453,10 @@ describe('accounts: identity, validation, password reset and lockout', () => {
     const code = forgot.body.data.devOtp as string;
     expect(code).toMatch(/^\d{6}$/);
 
+    // A second request within a minute looks exactly like the unknown-account answer (no new code sent).
     const again = await request(app).post(`${api}/auth/forgot-password`).send({ identifier: '9822200002' });
-    expect(again.body.error.code).toBe('OTP_COOLDOWN');
+    expect(again.status).toBe(200);
+    expect(again.body.data).toEqual(unknown.body.data);
 
     const wrong = await request(app).post(`${api}/auth/reset-password`).send({ identifier: '9822200002', code: code === '000000' ? '111111' : '000000', newPassword: 'newpass123' });
     expect(wrong.body.error.code).toBe('INVALID_RESET_CODE');

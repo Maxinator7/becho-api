@@ -229,10 +229,17 @@ export class AuthService {
     const user = await prisma.user.findUnique({ where: whereIdentifier(id) });
     if (!user || !user.email || user.status === UserStatus.BANNED) return generic;
 
-    await this.assertCooldown(user.id, VerificationPurpose.PASSWORD_RESET);
+    // Within the cooldown, silently skip sending (an error here would reveal that the account exists).
+    const last = await prisma.userVerification.findFirst({
+      where: { userId: user.id, purpose: VerificationPurpose.PASSWORD_RESET },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (last && Date.now() - last.createdAt.getTime() < OTP_RESEND_COOLDOWN_MS) return generic;
+
     const code = await this.createOtp(user.id, VerificationChannel.EMAIL, VerificationPurpose.PASSWORD_RESET);
     await sendEmail(passwordResetEmail(user.email, user.displayName, code));
-    return { ...generic, otpSentTo: maskEmail(user.email), ...(exposeDevOtp ? { devOtp: code } : {}) };
+    // devOtp only exists on dev/staging (EXPOSE_DEV_OTP), where showing the code is the point.
+    return { ...generic, ...(exposeDevOtp ? { devOtp: code } : {}) };
   }
 
   /** Step 2: code from the email + new password. Signs out every existing session. */

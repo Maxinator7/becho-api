@@ -9,7 +9,7 @@ All responses: `{ success: true, data }` or `{ success: false, error: { code, me
 |---|---|---|---|
 | `POST /auth/register` | – | `{ displayName, phone, email, password }` | **phone and email required.** Password 8–128 chars with a letter and a number. Name: letters, spaces, `.'-`. Errors: `PHONE_TAKEN`, `EMAIL_TAKEN`, `VALIDATION_ERROR`. Returns `{ user, tokens, otpChannel:'EMAIL', otpSentTo:'a***@gmail.com', verificationMessage, devOtp? }` |
 | `POST /auth/login` | – | `{ identifier, password }` | identifier = email, Indian mobile (any format) or user code `BCH-XXXXXX` (case-insensitive). Errors: `INVALID_CREDENTIALS` 401, `ACCOUNT_LOCKED` 429 (after 10 wrong passwords, 15 min; message says minutes left), `ACCOUNT_SUSPENDED` / `ACCOUNT_BANNED` 403 (message includes reason). Old `{ email | phone, password }` still accepted. |
-| `POST /auth/forgot-password` | – | `{ identifier }` | Always 200 with the same `message` whether or not the account exists. May include `otpSentTo`, `devOtp` (staging). `OTP_COOLDOWN` 429 within 60 s. |
+| `POST /auth/forgot-password` | – | `{ identifier }` | Always 200 with the same `{ message }` whether or not the account exists (a repeat within 60 s silently sends nothing). `devOtp` only on dev/staging. |
 | `POST /auth/reset-password` | – | `{ identifier, code, newPassword }` | `INVALID_RESET_CODE` 400 (wrong/expired/used; 5 attempts). Success signs out all sessions; also verifies a pending account. |
 | `POST /auth/change-password` | user | `{ currentPassword, newPassword, refreshToken? }` | `INVALID_CURRENT_PASSWORD`. Other sessions signed out (pass current refreshToken to keep this one). |
 | `POST /auth/resend-otp` | user | – | Emails a new verification code; `OTP_COOLDOWN` 429. |
