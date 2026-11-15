@@ -21,7 +21,7 @@ const EDITABLE_STATUSES: string[] = [ListingStatus.DRAFT, ListingStatus.REJECTED
 const DELETABLE_STATUSES: string[] = [ListingStatus.DRAFT, ListingStatus.EXPIRED, ListingStatus.REJECTED, ListingStatus.CHANGES_REQUESTED, ListingStatus.SOLD];
 
 const listingDetailInclude = {
-  seller: { select: { id: true, userCode: true, displayName: true, status: true, createdAt: true } },
+  seller: { select: { id: true, userCode: true, displayName: true, status: true, createdAt: true, emailVerifiedAt: true, phoneVerifiedAt: true } },
   category: { select: { id: true, name: true, slug: true, parentId: true } },
   attributes: {
     include: { attributeDefinition: { select: { id: true, name: true, slug: true, dataType: true } } },
