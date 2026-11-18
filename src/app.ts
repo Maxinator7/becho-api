@@ -20,6 +20,7 @@ import { mediaRouter } from './modules/media/media.routes.js';
 import { adminUsersRouter } from './modules/admin/admin-users.routes.js';
 import { adminListingsRouter } from './modules/admin/admin-listings.routes.js';
 import { analyticsRouter } from './modules/admin/analytics.routes.js';
+import { adminFeedbackRouter, feedbackRouter } from './modules/feedback/feedback.routes.js';
 import { LOCAL_FILES_ROUTE, localUploadRoot } from './modules/media/storage.js';
 
 export function createApp() {
@@ -53,6 +54,8 @@ export function createApp() {
   app.use('/api/v1/admin/users', adminUsersRouter);
   app.use('/api/v1/admin/listings', adminListingsRouter);
   app.use('/api/v1/admin/analytics', analyticsRouter);
+  app.use('/api/v1/feedback', feedbackRouter);
+  app.use('/api/v1/admin/feedback', adminFeedbackRouter);
   app.use('/api/v1/conversations', chatRouter);
   app.use('/api/v1/favorites', favoritesRouter);
   app.use('/api/v1/offers', offersRouter);

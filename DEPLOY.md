@@ -120,6 +120,22 @@ Free: 50 monitors, checked every 5 minutes.
 
 Side effect: pinging the API every 5 minutes keeps Render's free instance from sleeping (no ~1-minute cold starts). One always-on service uses ~744 of Render's 750 free hours a month, so don't add a second free Render service. The health endpoint doesn't touch the database, so Neon still scales to zero when idle.
 
+## 11. Preparing a closed beta
+Run these from `becho-api` on your Mac with the Neon connection string (single quotes):
+
+```bash
+export DATABASE_URL='<neon connection string>'
+npm run beta:prepare             # dry run: lists test accounts to delete + fake "mobile verified" flags
+npm run beta:prepare -- --apply  # do it
+npm run seed:demo                # 17 demo listings with photos across 8 cities (sellers named "… (Demo)")
+npm run user:set-role -- reviewer@example.com MODERATOR   # after the reviewer has registered
+unset DATABASE_URL
+```
+- Remove demo data later with `npm run seed:demo -- --remove`.
+- Render env for the beta: `AUTH_RATE_LIMIT=300` (testers on the same Wi-Fi share one IP), and decide `EXPOSE_DEV_OTP` (false once Brevo emails arrive reliably).
+- Cloudflare Access on `becho-admin`: add each reviewer's email to the policy.
+- Feedback from the website, app and admin lands in **Admin → Feedback**.
+
 ## Known limits of this setup
 - **Cold starts:** the API sleeps when idle, and the first request after that takes about a minute. Render Starter ($7/month) removes this.
 - **Background jobs only run while the API is awake.** The in-process scheduler expires listings and offers. Expiry catches up on the next wake-up.

@@ -52,6 +52,7 @@ model User {
   listingReviews      ListingReview[]    @relation("ListingReviews")
   notesAboutMe        UserNote[]         @relation("NotesAboutUser")
   notesWritten        UserNote[]         @relation("NotesWritten")
+  feedback            Feedback[]
 
   @@map("users")
 }
@@ -453,4 +454,32 @@ model UserNote {
 
   @@index([userId, createdAt])
   @@map("user_notes")
+}
+
+/// Beta feedback sent from the website, mobile app or admin portal.
+model Feedback {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  /// WEB, MOBILE or ADMIN
+  source     String
+  /// BUG, IDEA, CONFUSING, PRAISE, OTHER
+  category   String
+  rating     Int?
+  message    String
+  /// Page path (web/admin) or screen name (mobile) the tester was on.
+  page       String?
+  appVersion String?  @map("app_version")
+  userAgent  String?  @map("user_agent")
+  /// Tester agreed to be contacted about this feedback.
+  contactOk  Boolean  @default(false) @map("contact_ok")
+  /// NEW, IN_PROGRESS, DONE, WONT_FIX
+  status     String   @default("NEW")
+  staffNote  String?  @map("staff_note")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@map("feedback")
 }

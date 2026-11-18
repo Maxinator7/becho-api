@@ -626,3 +626,33 @@ describe('admin: analytics', () => {
     expect((await request(app).get(`${api}/admin/analytics`).set(auth((await registerVerified('Nosy', '9855500001')).token))).status).toBe(403);
   });
 });
+
+describe('beta feedback', () => {
+  it('accepts feedback signed in or out and lets staff triage it', async () => {
+    const anon = await request(app).post(`${api}/feedback`).set('User-Agent', 'jest-agent').send({ source: 'WEB', category: 'BUG', rating: 3, message: 'Search box loses focus', page: '/browse' });
+    expect(anon.status).toBe(201);
+    const tooShort = await request(app).post(`${api}/feedback`).send({ source: 'WEB', message: 'x' });
+    expect(tooShort.status).toBe(400);
+    const badSource = await request(app).post(`${api}/feedback`).send({ source: 'FAX', message: 'hello there' });
+    expect(badSource.status).toBe(400);
+
+    const tester = await registerVerified('Beta Tester', '9866600001');
+    const mine = await request(app).post(`${api}/feedback`).set(auth(tester.token)).send({ source: 'MOBILE', category: 'IDEA', rating: 5, message: 'Love the deal panel', page: 'ChatDetail', appVersion: '1.0.0', contactOk: true });
+    expect(mine.status).toBe(201);
+
+    expect((await request(app).get(`${api}/admin/feedback`).set(auth(tester.token))).status).toBe(403);
+    const inbox = await request(app).get(`${api}/admin/feedback`).set(auth(adminToken));
+    expect(inbox.status).toBe(200);
+    const items = inbox.body.data.items as { id: string; source: string; user: { displayName: string } | null; userAgent: string | null }[];
+    expect(items.find((i) => i.source === 'MOBILE')?.user?.displayName).toBe('Beta Tester');
+    expect(items.find((i) => i.source === 'WEB')?.userAgent).toBe('jest-agent');
+    expect(inbox.body.data.summary.averageRating).toBe(4);
+    expect(inbox.body.data.summary.byStatus.NEW).toBe(2);
+
+    const upd = await request(app).patch(`${api}/admin/feedback/${mine.body.data.id}`).set(auth(adminToken)).send({ status: 'DONE', staffNote: 'Shipped in v1.1' });
+    expect(upd.body.data.status).toBe('DONE');
+    const filtered = await request(app).get(`${api}/admin/feedback`).query({ status: 'DONE' }).set(auth(adminToken));
+    expect(filtered.body.data.items).toHaveLength(1);
+    expect((await request(app).patch(`${api}/admin/feedback/${mine.body.data.id}`).set(auth(adminToken)).send({})).status).toBe(400);
+  });
+});
